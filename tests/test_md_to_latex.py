@@ -1,6 +1,9 @@
+import re
+
 from conftest import requires_pandoc
 
 from latex2md import md_to_latex
+from latex2md.md_to_latex import _unwrap_pandocbounded
 
 pytestmark = requires_pandoc
 
@@ -13,12 +16,13 @@ def test_fragment_structure(sample_md):
     assert "\\begin{enumerate}" in out and "\\begin{itemize}" in out
     assert "\\textbf{bold}" in out and "\\emph{italic}" in out
     assert "\\href{https://example.com}{link}" in out
-    assert "\\includegraphics{figure.png}" in out
+    # pandoc >= 3.2 adds [keepaspectratio]; either form needs only graphicx.
+    assert re.search(r"\\includegraphics(\[keepaspectratio\])?\{figure\.png\}", out)
 
 
 def test_fragment_has_no_template_only_macros(sample_md):
     out = md_to_latex(sample_md)
-    for macro in ("\\hypertarget", "\\tightlist", "\\begin{Shaded}", "\\citep"):
+    for macro in ("\\hypertarget", "\\tightlist", "\\begin{Shaded}", "\\citep", "\\pandocbounded"):
         assert macro not in out
 
 
@@ -57,3 +61,18 @@ def test_standalone_without_chemistry_skips_mhchem():
 
 def test_empty_input():
     assert md_to_latex("") == "\n"
+
+
+def test_unwrap_pandocbounded_handles_nested_braces():
+    src = (
+        "a \\pandocbounded{\\includegraphics[keepaspectratio]{fig{1}.png}} b "
+        "\\pandocbounded{\\includegraphics{x\\}y}} c"
+    )
+    assert _unwrap_pandocbounded(src) == (
+        "a \\includegraphics[keepaspectratio]{fig{1}.png} b \\includegraphics{x\\}y} c"
+    )
+
+
+def test_unwrap_pandocbounded_leaves_unbalanced_input():
+    assert _unwrap_pandocbounded("\\pandocbounded{oops") == "\\pandocbounded{oops"
+    assert _unwrap_pandocbounded("no images") == "no images"
