@@ -42,6 +42,8 @@ latex2md auto paper.tex
 - `--standalone` (for `to-latex` and `auto`) writes a complete document with a preamble.
 - `--base-dir DIR` (for `to-md` and `auto`) is the folder `\input`/`\include` may read from.
   It defaults to the input file's folder (or the current folder for stdin).
+- Warnings (see below) are printed to stderr; `--quiet` hides them and `--strict`
+  exits with status 1 when there are any.
 
 ## Python
 
@@ -60,6 +62,35 @@ md = latex_to_md(tex_text, base_dir="paper/")                # text + project fo
 
 All errors (pandoc missing, failing or timing out) raise `ConversionError`; its
 `.stderr` holds pandoc's message.
+
+### Warnings
+
+Each `str` function has a `convert_*` twin that returns a `ConversionResult`
+with the text and a list of `ConversionWarning(kind, message, location)`:
+
+```python
+from latex2md import convert_latex_file_to_md
+
+result = convert_latex_file_to_md("paper/main.tex")
+print(result.text)
+for warning in result.warnings:
+    print(warning.kind, warning.message, warning.location)
+```
+
+| Kind | Raised when |
+|---|---|
+| `skipped_include` | an include was not inlined: absolute path, outside the base folder, missing, cycle, nesting too deep, size budget used up, or no base folder |
+| `unknown_command` | pandoc skipped a command it does not know (layout-only commands such as `\centering` are not reported) |
+| `unknown_environment` | pandoc did not know an environment; its content is kept |
+| `missing_bibliography` | `\bibliography`/`\addbibresource` has no `.bbl` or readable `.bib` |
+| `bibliography` | a `.bib` entry was malformed and left out |
+| `unresolved_reference` | `\ref`/`\eqref`/`\cref` names a label that does not exist |
+| `dropped_image` | `md_to_latex` removed an image it may not reference |
+| `pandoc` | any other pandoc `[WARNING]` |
+
+Locations of `unknown_*` warnings are line numbers in the flattened source
+(see `flatten_latex`), since includes have already been inlined. Unknown
+commands in the preamble are not reported.
 
 ## What it handles
 

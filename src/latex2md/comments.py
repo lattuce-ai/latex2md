@@ -4,9 +4,9 @@ from __future__ import annotations
 import re
 
 # A % starts a comment unless it is escaped (\%).
-_COMMENT_RE = re.compile(r"(?<!\\)%.*$", re.M)
-_COMMENT_ONLY_LINE_RE = re.compile(r"^[ \t]*(?<!\\)%.*\n", re.M)
-_VERBATIM_RE = re.compile(r"\\begin\{(verbatim\*?|lstlisting|minted|comment)\}.*?\\end\{\1\}", re.S)
+_COMMENT_RE = re.compile(r"(?<!\\)%.*$", re.MULTILINE)
+_COMMENT_ONLY_LINE_RE = re.compile(r"^[ \t]*(?<!\\)%.*\n", re.MULTILINE)
+_VERBATIM_RE = re.compile(r"\\begin\{(verbatim\*?|lstlisting|minted|comment)\}.*?\\end\{\1\}", re.DOTALL)
 _VERB_INLINE_RE = re.compile(r"\\verb\*?([^a-zA-Z\s*]).*?\1")
 
 

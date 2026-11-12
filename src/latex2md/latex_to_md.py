@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import re
 from importlib import resources
-
 from pathlib import Path
 
 from latex2md.comments import strip_comments
 from latex2md.includes import expand_includes
 from latex2md.mhchem import wrap_text_mode_mhchem
-from latex2md.pandoc import MARKDOWN_OUT, run_pandoc
+from latex2md.pandoc import MARKDOWN_OUT, pandoc_messages, run_pandoc_output
+from latex2md.result import ConversionResult, WarningLog
 
 # Leftover pandoc attribute blocks such as {#sec:intro} or {.unnumbered}.
 _ATTR_RE = re.compile(r"[ \t]*\{(?:[#.][\w:.-]+[ \t]*|[\w-]+=\"[^\"]*\"[ \t]*)+\}")
@@ -24,6 +24,8 @@ _THEBIBLIOGRAPHY_BEGIN_RE = re.compile(r"\\begin\{thebibliography\}\s*\{[^{}]*\}
 _THEBIBLIOGRAPHY_END_RE = re.compile(r"\\end\{thebibliography\}")
 _BIBITEM_RE = re.compile(r"\\bibitem\s*(?:\[[^\]]*\])?\s*\{[^{}]*\}")
 _BIBLIOGRAPHY_RE = re.compile(r"\\bibliography\s*\{[^{}]*\}")
+_BIB_COMMAND_RE = re.compile(r"\\(?:bibliography|addbibresource)\s*(?:\[[^\]]*\])?\s*\{([^{}]*)\}")
+_BEGIN_DOCUMENT = "\\begin{document}"
 _FENCE_CLASS_RE = re.compile(r"^(\s*)(`{3,}|~{3,}) (\w[\w-]*)$")
 _EMPTY_TABLE_ROW_RE = re.compile(r"^\|(?:\s*\|)+$")
 _TABLE_RULE_RE = re.compile(r"^\|(?:\s*:?-+:?\s*\|)+$")
@@ -74,6 +76,49 @@ def _bibliography_as_list(latex: str) -> str:
     return _BIBITEM_RE.sub(lambda _: "\\item ", latex)
 
 
+def _body_start_line(source: str) -> int:
+    index = source.find(_BEGIN_DOCUMENT)
+    return source.count("\n", 0, index) + 1 if index != -1 else 0
+
+
+def convert_latex_to_md(
+    latex: str,
+    *,
+    base_dir: str | Path | None = None,
+    front_matter: bool = True,
+    bbl: str | None = None,
+) -> ConversionResult:
+    """Convert LaTeX to Markdown and report what could not be carried over.
+
+    Takes the same arguments as :func:`latex_to_md` and returns a
+    :class:`~latex2md.result.ConversionResult` whose ``warnings`` list skipped
+    includes, commands and environments pandoc did not know, and missing
+    bibliographies.
+    """
+    warnings = WarningLog()
+    source = expand_includes(strip_comments(latex), base_dir, warnings=warnings)
+    if bbl is not None:
+        source = _BIBLIOGRAPHY_RE.sub(lambda _: strip_comments(bbl), source, count=1)
+    else:
+        for match in _BIB_COMMAND_RE.finditer(source):
+            warnings.add(
+                "missing_bibliography",
+                f"{match.group(0)}: no .bbl given, so citations stay as [@key]",
+            )
+    source = wrap_text_mode_mhchem(_bibliography_as_list(source))
+    args = ["--wrap=none", "--verbose"]
+    args.append("--standalone" if front_matter else "--metadata=latex2md_body_abstract:true")
+    with resources.as_file(resources.files("latex2md") / _LUA_FILTER) as lua_filter:
+        output = run_pandoc_output(
+            source,
+            from_format="latex",
+            to_format=MARKDOWN_OUT,
+            extra_args=[*args, f"--lua-filter={lua_filter}"],
+        )
+    warnings.extend_unique(pandoc_messages(output.stderr, body_start_line=_body_start_line(source)))
+    return ConversionResult(_clean_markdown(output.stdout), list(warnings))
+
+
 def latex_to_md(
     latex: str,
     *,
@@ -93,21 +138,28 @@ def latex_to_md(
     ``front_matter=True`` writes title/author/date/abstract as YAML front matter;
     ``False`` drops title/author and puts the abstract under an "Abstract"
     heading. ``bbl`` (compiled bibliography) replaces ``\\bibliography{...}``.
+
+    Use :func:`convert_latex_to_md` to also get the conversion warnings.
     """
-    source = expand_includes(strip_comments(latex), base_dir)
-    if bbl is not None:
-        source = _BIBLIOGRAPHY_RE.sub(lambda _: strip_comments(bbl), source, count=1)
-    source = wrap_text_mode_mhchem(_bibliography_as_list(source))
-    args = ["--wrap=none"]
-    args.append("--standalone" if front_matter else "--metadata=latex2md_body_abstract:true")
-    with resources.as_file(resources.files("latex2md") / _LUA_FILTER) as lua_filter:
-        markdown = run_pandoc(
-            source,
-            from_format="latex",
-            to_format=MARKDOWN_OUT,
-            extra_args=[*args, f"--lua-filter={lua_filter}"],
-        )
-    return _clean_markdown(markdown)
+    return convert_latex_to_md(latex, base_dir=base_dir, front_matter=front_matter, bbl=bbl).text
+
+
+def convert_latex_file_to_md(
+    path: str | Path,
+    *,
+    base_dir: str | Path | None = None,
+    front_matter: bool = True,
+) -> ConversionResult:
+    """:func:`latex_file_to_md`, returning a :class:`~latex2md.result.ConversionResult`."""
+    path = Path(path)
+    bbl_path = path.with_suffix(".bbl")
+    bbl = bbl_path.read_text(encoding="utf-8", errors="replace") if bbl_path.is_file() else None
+    return convert_latex_to_md(
+        path.read_text(encoding="utf-8", errors="replace"),
+        base_dir=base_dir or path.parent,
+        front_matter=front_matter,
+        bbl=bbl,
+    )
 
 
 def latex_file_to_md(
@@ -121,12 +173,4 @@ def latex_file_to_md(
     Includes resolve under its folder (or ``base_dir``), and a sibling ``.bbl``
     with the same name, as shipped in arXiv sources, fills in the bibliography.
     """
-    path = Path(path)
-    bbl_path = path.with_suffix(".bbl")
-    bbl = bbl_path.read_text(encoding="utf-8", errors="replace") if bbl_path.is_file() else None
-    return latex_to_md(
-        path.read_text(encoding="utf-8", errors="replace"),
-        base_dir=base_dir or path.parent,
-        front_matter=front_matter,
-        bbl=bbl,
-    )
+    return convert_latex_file_to_md(path, base_dir=base_dir, front_matter=front_matter).text

@@ -5,9 +5,10 @@ import argparse
 import sys
 from pathlib import Path
 
-from latex2md.latex_to_md import latex_file_to_md, latex_to_md
-from latex2md.md_to_latex import md_to_latex
+from latex2md.latex_to_md import convert_latex_file_to_md, convert_latex_to_md
+from latex2md.md_to_latex import convert_md_to_latex
 from latex2md.pandoc import ConversionError
+from latex2md.result import ConversionResult
 
 MARKDOWN_SUFFIXES = {".md", ".markdown", ".mdown"}
 LATEX_SUFFIXES = {".tex", ".latex", ".ltx"}
@@ -55,7 +56,16 @@ def build_parser() -> argparse.ArgumentParser:
             )
         if name != "to-md":
             cmd.add_argument("--standalone", action="store_true", help="emit a complete LaTeX document")
+        cmd.add_argument("--strict", action="store_true", help="exit with status 1 if there are any warnings")
+        cmd.add_argument("-q", "--quiet", action="store_true", help="do not print warnings")
     return parser
+
+
+def _report(result: ConversionResult, args: argparse.Namespace) -> int:
+    if not args.quiet:
+        for warning in result.warnings:
+            print(f"latex2md: warning: {warning}", file=sys.stderr)
+    return 1 if args.strict and result.warnings else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -63,16 +73,16 @@ def main(argv: list[str] | None = None) -> int:
     try:
         direction = _direction(args.command, args.input)
         if direction == "to-latex":
-            result = md_to_latex(_read(args.input), standalone=getattr(args, "standalone", False))
+            result = convert_md_to_latex(_read(args.input), standalone=getattr(args, "standalone", False))
         elif args.input == "-":
-            result = latex_to_md(_read(args.input), base_dir=args.base_dir or Path.cwd())
+            result = convert_latex_to_md(_read(args.input), base_dir=args.base_dir or Path.cwd())
         else:
-            result = latex_file_to_md(args.input, base_dir=args.base_dir)
-        _write(args.output, result)
+            result = convert_latex_file_to_md(args.input, base_dir=args.base_dir)
+        _write(args.output, result.text)
     except (ConversionError, OSError) as exc:
         print(f"latex2md: {exc}", file=sys.stderr)
         return 1
-    return 0
+    return _report(result, args)
 
 
 if __name__ == "__main__":  # pragma: no cover
