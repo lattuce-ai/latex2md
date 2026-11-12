@@ -1,0 +1,47 @@
+name: release
+
+# Push a tag like v0.2.0 to publish to PyPI as `lattuce-latex2md`.
+# Uses PyPI trusted publishing: no API token is stored in GitHub. One-time setup
+# on pypi.org: add a (pending) trusted publisher for project "lattuce-latex2md",
+# owner "lattuce-ai", repository "latex2md", workflow "release.yml",
+# environment "pypi".
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: sudo apt-get update && sudo apt-get install -y pandoc
+      - run: pip install -e '.[dev]'
+      - run: pytest -q
+      - name: Check the tag matches the package version
+        run: |
+          version="$(python -c 'import latex2md; print(latex2md.__version__)')"
+          test "v${version}" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} != v${version}"; exit 1; }
+      - run: python -m build
+      - name: Check the wheel ships the Lua filter
+        run: python -m zipfile -l dist/*.whl | grep -q 'latex2md/latex_to_md.lua'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

@@ -14,8 +14,12 @@ sudo apt-get install pandoc
 ```
 
 ```bash
-pip install -e .
+pip install lattuce-latex2md
 ```
+
+The distribution is called `lattuce-latex2md` (the name `latex2md` is taken on PyPI
+by an unrelated project); the import name is `latex2md`. From a checkout:
+`pip install -e .`.
 
 If pandoc is somewhere else, set `LATEX2MD_PANDOC=/path/to/pandoc`.
 
@@ -112,3 +116,10 @@ pip install -e '.[dev]'
 ```bash
 pytest
 ```
+
+## Releasing
+
+Bump `version` in `pyproject.toml` and `__version__` in `src/latex2md/__init__.py`,
+then push a matching tag (`v0.2.0`). The `release` workflow tests, builds and
+publishes to PyPI with trusted publishing (setup steps are in
+`.github/workflows/release.yml`).
