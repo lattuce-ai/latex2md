@@ -1,0 +1,8 @@
+\section{Method}\label{sec:method}
+The loss combines two terms:
+\begin{align}
+  \mathcal{L} &= \mathcal{L}_{\text{task}} + \lambda \norm{W}_2^2 \label{eq:loss}\\
+  \lambda &= 10^{-4}
+\end{align}
+Equation~\eqref{eq:loss} is minimised with Adam. The scoring function is:
+\lstinputlisting[language=Python]{code/score.py}

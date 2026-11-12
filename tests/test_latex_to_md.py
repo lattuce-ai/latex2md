@@ -1,7 +1,7 @@
 from conftest import requires_pandoc
 
 from latex2md import latex_to_md
-from latex2md.latex_to_md import _strip_comments
+from latex2md.comments import strip_comments
 
 pytestmark = requires_pandoc
 
@@ -53,4 +53,4 @@ def test_fragment_input():
 
 def test_strip_comments_keeps_verb():
     src = "a \\verb|50%| b % gone\n% whole line\nc 10\\% d\n"
-    assert _strip_comments(src) == "a \\verb|50%| b \nc 10\\% d\n"
+    assert strip_comments(src) == "a \\verb|50%| b \nc 10\\% d\n"

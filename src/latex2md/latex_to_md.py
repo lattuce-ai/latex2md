@@ -4,13 +4,12 @@ from __future__ import annotations
 import re
 from importlib import resources
 
-from latex2md.pandoc import MARKDOWN_OUT, run_pandoc
+from pathlib import Path
 
-# A % starts a comment unless it is escaped (\%).
-_COMMENT_RE = re.compile(r"(?<!\\)%.*$", re.M)
-_COMMENT_ONLY_LINE_RE = re.compile(r"^[ \t]*%.*\n", re.M)
-_VERBATIM_RE = re.compile(r"\\begin\{(verbatim\*?|lstlisting|minted)\}.*?\\end\{\1\}", re.S)
-_VERB_INLINE_RE = re.compile(r"\\verb\*?(.).*?\1")
+from latex2md.comments import strip_comments
+from latex2md.includes import expand_includes
+from latex2md.mhchem import wrap_text_mode_mhchem
+from latex2md.pandoc import MARKDOWN_OUT, run_pandoc
 
 # Leftover pandoc attribute blocks such as {#sec:intro} or {.unnumbered}.
 _ATTR_RE = re.compile(r"[ \t]*\{(?:[#.][\w:.-]+[ \t]*|[\w-]+=\"[^\"]*\"[ \t]*)+\}")
@@ -19,6 +18,12 @@ _BLANK_RUN_RE = re.compile(r"\n{3,}")
 # pandoc pads list markers to a tab stop ("-   item", "1.  item").
 _LIST_MARKER_RE = re.compile(r"^(\s*)([-*+]|\d+[.)])[ ]{2,}(?=\S)")
 _LUA_FILTER = "latex_to_md.lua"
+# thebibliography's {widest-label} argument and \bibitem keys otherwise leak
+# into the text; turn the environment into a plain list under a heading.
+_THEBIBLIOGRAPHY_BEGIN_RE = re.compile(r"\\begin\{thebibliography\}\s*\{[^{}]*\}")
+_THEBIBLIOGRAPHY_END_RE = re.compile(r"\\end\{thebibliography\}")
+_BIBITEM_RE = re.compile(r"\\bibitem\s*(?:\[[^\]]*\])?\s*\{[^{}]*\}")
+_BIBLIOGRAPHY_RE = re.compile(r"\\bibliography\s*\{[^{}]*\}")
 _FENCE_CLASS_RE = re.compile(r"^(\s*)(`{3,}|~{3,}) (\w[\w-]*)$")
 _EMPTY_TABLE_ROW_RE = re.compile(r"^\|(?:\s*\|)+$")
 _TABLE_RULE_RE = re.compile(r"^\|(?:\s*:?-+:?\s*\|)+$")
@@ -47,21 +52,6 @@ def _promote_headerless_tables(lines: list[str]) -> list[str]:
     return out
 
 
-def _strip_comments(latex: str) -> str:
-    """Remove % comments, leaving verbatim environments and \\verb untouched."""
-    protected: list[str] = []
-
-    def protect(match: re.Match[str]) -> str:
-        protected.append(match.group(0))
-        return f"\x00{len(protected) - 1}\x00"
-
-    text = _VERBATIM_RE.sub(protect, latex)
-    text = _VERB_INLINE_RE.sub(protect, text)
-    text = _COMMENT_ONLY_LINE_RE.sub("", text)
-    text = _COMMENT_RE.sub("", text)
-    return re.sub(r"\x00(\d+)\x00", lambda m: protected[int(m.group(1))], text)
-
-
 def _clean_markdown(markdown: str) -> str:
     lines: list[str] = []
     in_code = False
@@ -78,17 +68,65 @@ def _clean_markdown(markdown: str) -> str:
     return _BLANK_RUN_RE.sub("\n\n", text).strip() + "\n"
 
 
-def latex_to_md(latex: str) -> str:
+def _bibliography_as_list(latex: str) -> str:
+    latex = _THEBIBLIOGRAPHY_BEGIN_RE.sub(lambda _: "\\section*{References}\n\\begin{itemize}", latex)
+    latex = _THEBIBLIOGRAPHY_END_RE.sub(lambda _: "\\end{itemize}", latex)
+    return _BIBITEM_RE.sub(lambda _: "\\item ", latex)
+
+
+def latex_to_md(
+    latex: str,
+    *,
+    base_dir: str | Path | None = None,
+    front_matter: bool = True,
+    bbl: str | None = None,
+) -> str:
     """Convert LaTeX (a full document or a fragment) to Markdown.
 
     Math is kept as ``$...$`` / ``$$...$$``, ``\\cite{key}`` becomes ``[@key]``,
     and pandoc-only attribute/div syntax is removed so the output is plain Markdown.
+
+    ``\\input``/``\\include``/``\\subfile``/``\\import`` and listing includes are
+    inlined from ``base_dir`` (the project folder); files outside it are never
+    read. Without ``base_dir`` include commands are dropped.
+
+    ``front_matter=True`` writes title/author/date/abstract as YAML front matter;
+    ``False`` drops title/author and puts the abstract under an "Abstract"
+    heading. ``bbl`` (compiled bibliography) replaces ``\\bibliography{...}``.
     """
+    source = expand_includes(strip_comments(latex), base_dir)
+    if bbl is not None:
+        source = _BIBLIOGRAPHY_RE.sub(lambda _: strip_comments(bbl), source, count=1)
+    source = wrap_text_mode_mhchem(_bibliography_as_list(source))
+    args = ["--wrap=none"]
+    args.append("--standalone" if front_matter else "--metadata=latex2md_body_abstract:true")
     with resources.as_file(resources.files("latex2md") / _LUA_FILTER) as lua_filter:
         markdown = run_pandoc(
-            _strip_comments(latex),
+            source,
             from_format="latex",
             to_format=MARKDOWN_OUT,
-            extra_args=["--wrap=none", f"--lua-filter={lua_filter}"],
+            extra_args=[*args, f"--lua-filter={lua_filter}"],
         )
     return _clean_markdown(markdown)
+
+
+def latex_file_to_md(
+    path: str | Path,
+    *,
+    base_dir: str | Path | None = None,
+    front_matter: bool = True,
+) -> str:
+    """Convert a ``.tex`` file.
+
+    Includes resolve under its folder (or ``base_dir``), and a sibling ``.bbl``
+    with the same name, as shipped in arXiv sources, fills in the bibliography.
+    """
+    path = Path(path)
+    bbl_path = path.with_suffix(".bbl")
+    bbl = bbl_path.read_text(encoding="utf-8", errors="replace") if bbl_path.is_file() else None
+    return latex_to_md(
+        path.read_text(encoding="utf-8", errors="replace"),
+        base_dir=base_dir or path.parent,
+        front_matter=front_matter,
+        bbl=bbl,
+    )

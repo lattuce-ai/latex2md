@@ -5,7 +5,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from latex2md.latex_to_md import latex_to_md
+from latex2md.latex_to_md import latex_file_to_md, latex_to_md
 from latex2md.md_to_latex import md_to_latex
 from latex2md.pandoc import ConversionError
 
@@ -48,6 +48,11 @@ def build_parser() -> argparse.ArgumentParser:
         cmd = sub.add_parser(name, help=help_text)
         cmd.add_argument("input", nargs="?", default="-", help="input file, or - for stdin (default)")
         cmd.add_argument("-o", "--output", help="output file (default: stdout)")
+        if name != "to-latex":
+            cmd.add_argument(
+                "--base-dir",
+                help="folder that \\input/\\include may read from (default: the input file's folder, or cwd for stdin)",
+            )
         if name != "to-md":
             cmd.add_argument("--standalone", action="store_true", help="emit a complete LaTeX document")
     return parser
@@ -57,11 +62,12 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         direction = _direction(args.command, args.input)
-        source = _read(args.input)
         if direction == "to-latex":
-            result = md_to_latex(source, standalone=getattr(args, "standalone", False))
+            result = md_to_latex(_read(args.input), standalone=getattr(args, "standalone", False))
+        elif args.input == "-":
+            result = latex_to_md(_read(args.input), base_dir=args.base_dir or Path.cwd())
         else:
-            result = latex_to_md(source)
+            result = latex_file_to_md(args.input, base_dir=args.base_dir)
         _write(args.output, result)
     except (ConversionError, OSError) as exc:
         print(f"latex2md: {exc}", file=sys.stderr)

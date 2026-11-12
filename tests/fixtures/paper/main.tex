@@ -1,0 +1,57 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage[version=4]{mhchem}
+\usepackage{hyperref}
+\input{macros}
+
+\title{Sparse Attention for Long Reaction Sequences}
+\author{A. Researcher \and B. Scientist}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We study \model{} on long chemical reaction sequences such as \ce{2H2 + O2 -> 2H2O}.
+Our method improves accuracy by 12\% over dense baselines.
+\end{abstract}
+
+% Sections live in separate files, as in most arXiv submissions.
+\input{sections/intro}
+\include{sections/method}
+% \input{sections/unused}   <- commented out, must not be inlined
+
+% Hostile includes must never be read.
+\input{/etc/hostname}
+\input{../../../../etc/hostname}
+
+\section{Results}\label{sec:results}
+Table~\ref{tab:main} compares \model{} with baselines.
+
+\begin{table}[t]
+  \centering
+  \caption{Accuracy on the benchmark.}\label{tab:main}
+  \begin{tabular}{lcc}
+    \toprule
+    Model & Accuracy & Params \\
+    \midrule
+    Dense & 71.2 & 110M \\
+    \model{} & \textbf{83.4} & 95M \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.8\linewidth]{figures/attention.png}
+  \caption{Attention pattern of \model{}.}\label{fig:attn}
+\end{figure}
+
+\bibliographystyle{plain}
+\begin{thebibliography}{9}
+\bibitem{vaswani2017} A. Vaswani et al. Attention is all you need. NeurIPS, 2017.
+\end{thebibliography}
+
+\end{document}

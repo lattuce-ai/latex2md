@@ -53,7 +53,8 @@ def run_pandoc(text: str, *, from_format: str, to_format: str, extra_args: Seque
             "pandoc is not installed; install it (https://pandoc.org/installing.html) "
             "or set LATEX2MD_PANDOC to its path"
         )
-    command = [binary, f"--from={from_format}", f"--to={to_format}", *extra_args]
+    # --sandbox stops pandoc reading files named in the document (\\input{/etc/passwd}).
+    command = [binary, "--sandbox", f"--from={from_format}", f"--to={to_format}", *extra_args]
     try:
         result = subprocess.run(
             command,
