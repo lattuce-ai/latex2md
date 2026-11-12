@@ -97,10 +97,15 @@ function Para(para)
   return blocks
 end
 
--- Cross-references: the anchors do not exist in Markdown, so keep the text.
--- Unresolved ones ("[eq:loss]") become "(eq:loss)".
+-- Cross-references are resolved to text before pandoc runs (structure.py).
+-- pandoc's own reference links point at anchors Markdown does not have, so
+-- keep their text; unresolved ones ("[eq:loss]") become "(eq:loss)".
+-- Explicit \\href{#label}{...} links (anchors=True) are resolved in Pandoc().
 function Link(link)
   if link.target:sub(1, 1) ~= "#" then
+    return nil
+  end
+  if not link.attributes["reference-type"] then
     return nil
   end
   local text = stringify(link.content)
@@ -111,17 +116,65 @@ function Link(link)
   return link.content
 end
 
+-- Spans (from \\label in running text, \\textsc-less styling, ...) would be
+-- written as raw HTML; keep only their content.
+function Span(span)
+  return span.content
+end
+
+-- citeproc's reference list (Div#refs of csl-entry Divs) becomes a
+-- "References" heading and a bullet list, like thebibliography. It is
+-- tagged here and moved to the \\bibliography position in Pandoc().
+local function references_block(div)
+  local items = {}
+  for _, entry in ipairs(div.content) do
+    local blocks = entry.t == "Div" and entry.content or { entry }
+    table.insert(items, { pandoc.Plain(pandoc.utils.blocks_to_inlines(blocks)) })
+  end
+  local blocks = { pandoc.Header(1, { pandoc.Str("References") }) }
+  if #items > 0 then
+    table.insert(blocks, pandoc.BulletList(items))
+  end
+  return pandoc.Div(blocks, pandoc.Attr("latex2md-references"))
+end
+
 -- Divs (table/figure wrappers, environments) are unwrapped.
 function Div(div)
+  if div.identifier == "refs" then
+    return references_block(div)
+  end
   return div.content
 end
 
--- Figures: a single image whose alt text is the caption.
-local function first_image(blocks)
-  local found
+-- Numbered captions arrive as "Figure 2: ..." / "Table 1: ..." (prefixed in
+-- structure.py, which knows LaTeX's numbering); split off that label.
+local function split_label(inlines, word)
+  if #inlines >= 3 and inlines[1].t == "Str" and inlines[1].text == word and inlines[2].t == "Space"
+      and inlines[3].t == "Str" and inlines[3].text:match("^[%w.]+:$") then
+    local rest = pandoc.List()
+    for i = 5, #inlines do
+      rest:insert(inlines[i])
+    end
+    return pandoc.List({ inlines[1], inlines[2], inlines[3] }), rest
+  end
+  return nil, inlines
+end
+
+local function caption_para(caption, word)
+  local label, rest = split_label(caption, word)
+  if not label then
+    return pandoc.Para(caption)
+  end
+  return pandoc.Para(pandoc.List({ pandoc.Strong(label), pandoc.Space() }) .. rest)
+end
+
+-- Figures: a single image whose alt text is the caption. Figures with several
+-- images (subfigures) keep each image, then the caption as a paragraph.
+local function images_in(blocks)
+  local found = {}
   pandoc.walk_block(pandoc.Div(blocks), {
     Image = function(image)
-      found = found or image
+      table.insert(found, image)
     end,
   })
   return found
@@ -129,15 +182,19 @@ end
 
 if pandoc.Figure then
   function Figure(figure)
-    local image = first_image(figure.content)
-    if not image then
-      return figure.content
-    end
+    local images = images_in(figure.content)
     local caption = pandoc.utils.blocks_to_inlines(figure.caption.long or {})
-    if #caption > 0 then
-      image.caption = caption
+    if #images == 1 then
+      if #caption > 0 then
+        images[1].caption = caption
+      end
+      return pandoc.Para({ images[1] })
     end
-    return pandoc.Para({ image })
+    local blocks = pandoc.List(figure.content)
+    if #caption > 0 then
+      blocks:insert(caption_para(caption, "Figure"))
+    end
+    return blocks
   end
 end
 
@@ -148,8 +205,84 @@ function Table(tbl)
     return nil
   end
   tbl.caption.long = {}
-  local label = pandoc.List({ pandoc.Strong({ pandoc.Str("Table:") }), pandoc.Space() })
-  return { pandoc.Para(label .. caption), tbl }
+  local label = split_label(caption, "Table")
+  if label then
+    return { caption_para(caption, "Table"), tbl }
+  end
+  local prefix = pandoc.List({ pandoc.Strong({ pandoc.Str("Table:") }), pandoc.Space() })
+  return { pandoc.Para(prefix .. caption), tbl }
+end
+
+-- GitHub-style heading ids, which GitHub, GitLab and most Markdown renderers
+-- generate on their own: lower case, punctuation dropped, spaces to "-",
+-- "-1", "-2"... for repeats. Plain Markdown has no other anchor syntax.
+local function heading_slugs(blocks)
+  local slugs, seen = {}, {}
+  for _, block in ipairs(blocks) do
+    if block.t == "Header" then
+      local slug = pandoc.text.lower(stringify(block.content))
+      slug = slug:gsub("[%p]", function(c)
+        return (c == "-" or c == "_") and c or ""
+      end):gsub(" ", "-")
+      local count = seen[slug]
+      seen[slug] = (count or 0) + 1
+      if count then
+        slug = slug .. "-" .. count
+      end
+      if block.identifier ~= "" then
+        slugs[block.identifier] = slug
+      end
+    end
+  end
+  return slugs
+end
+
+local function resolve_anchors(doc, enabled)
+  local slugs = enabled and heading_slugs(doc.blocks) or {}
+  return doc:walk({
+    Link = function(link)
+      if link.target:sub(1, 1) ~= "#" then
+        return nil
+      end
+      local slug = slugs[link.target:sub(2)]
+      if slug then
+        link.target = "#" .. slug
+        return link
+      end
+      return link.content
+    end,
+  })
+end
+
+-- With --citeproc, pandoc >= 3.2 writes rendered citations even when the
+-- citations extension is on. To keep [@key] on every version, write each
+-- citation with a citeproc-free writer and emit it as raw Markdown.
+local function citations_as_markdown(cite)
+  local doc = pandoc.Pandoc({ pandoc.Plain({ pandoc.Cite({}, cite.citations) }) })
+  local text = pandoc.write(doc, "markdown", pandoc.WriterOptions({ wrap_text = "wrap-none" }))
+  return pandoc.RawInline("markdown", (text:gsub("%s+$", "")))
+end
+
+local function place_references(doc)
+  local references, position
+  local blocks = pandoc.List()
+  for _, block in ipairs(doc.blocks) do
+    if block.t == "Div" and block.identifier == "latex2md-references" then
+      references = block.content
+    elseif block.t == "Para" and #block.content == 1 and block.content[1].t == "Str"
+        and block.content[1].text == "LATEX2MDREFERENCES" then
+      position = position or #blocks + 1
+    else
+      blocks:insert(block)
+    end
+  end
+  if references then
+    for i, block in ipairs(references) do
+      blocks:insert((position or #blocks + 1) + i - 1, block)
+    end
+  end
+  doc.blocks = blocks
+  return doc
 end
 
 -- Title/author/abstract live in metadata. With front matter disabled, move
@@ -163,6 +296,24 @@ function Pandoc(doc)
     body:extend(doc.blocks)
     doc.blocks = body
   end
-  doc.meta.latex2md_body_abstract = nil
-  return doc
+  local anchors = doc.meta.latex2md_anchors and true or false
+  local citeproc = doc.meta.latex2md_citeproc and true or false
+  local rendered = doc.meta.latex2md_cite_rendered and true or false
+  for _, key in ipairs({ "latex2md_body_abstract", "latex2md_anchors", "latex2md_citeproc", "latex2md_cite_rendered" }) do
+    doc.meta[key] = nil
+  end
+  if citeproc then
+    -- These point at latex2md's temporary copies.
+    doc.meta.bibliography = nil
+    doc.meta.csl = nil
+    doc = doc:walk({
+      Cite = function(cite)
+        if rendered then
+          return cite.content
+        end
+        return citations_as_markdown(cite)
+      end,
+    })
+  end
+  return resolve_anchors(place_references(doc), anchors)
 end

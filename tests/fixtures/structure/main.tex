@@ -1,0 +1,124 @@
+\documentclass{article}
+\usepackage{amsmath,amsthm,graphicx,subcaption,cleveref}
+\usepackage{algorithm,algpseudocode}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{definition}{Definition}
+\newtheorem*{remark}{Remark}
+\newcommand{\R}{\mathbb{R}}
+
+\begin{document}
+
+\section{Introduction}\label{sec:intro}
+We prove \cref{thm:main} using \Cref{lem:aux}, see \autoref{sec:method} and
+\cref{sec:intro,sec:method}. \Cref{eq:energy} and \eqref{eq:second} hold; so does
+equation~\ref{eq:energy}. \Cref{fig:panels} has \subref{fig:left} and
+\cref{fig:right}; \cref{tab:results} lists results. Missing: \ref{nope}.
+
+\begin{equation}\label{eq:energy}
+  E = mc^2
+\end{equation}
+An unnumbered one:
+\begin{equation*}
+  a = b \label{eq:ignored}
+\end{equation*}
+
+\begin{align}
+  f(x) &= x^2 \label{eq:first} \\
+  g(x) &= x^3 \nonumber \\
+  h(x) &= x^4 \label{eq:second}
+\end{align}
+
+\begin{align*}
+  p &= q
+\end{align*}
+
+\begin{gather}
+  u = v \notag \\
+  w = z \tag{$\star$} \label{eq:star}
+\end{gather}
+
+\begin{alignat}{2}
+  a &= b &\quad c &= d
+\end{alignat}
+
+\section{Method}\label{sec:method}
+\subsection{Setup}\label{sec:setup}
+
+\begin{definition}[Sparse map]\label{def:sparse}
+A map $f\colon \R^n \to \R^m$ is \emph{sparse} if it has few non-zeros.
+\end{definition}
+
+\begin{theorem}[Main result]\label{thm:main}
+Every sparse map is fast.
+\end{theorem}
+
+\begin{lemma}\label{lem:aux}
+Lemmas share the theorem counter (\cref{eq:first}).
+\end{lemma}
+
+\begin{remark}
+Remarks are not numbered.
+\end{remark}
+
+\begin{proof}
+Apply \cref{lem:aux} twice.
+\end{proof}
+
+\begin{figure}[t]
+  \centering
+  \begin{subfigure}[b]{0.45\linewidth}
+    \includegraphics{left.png}
+    \caption{Left panel.}\label{fig:left}
+  \end{subfigure}
+  \begin{subfigure}[b]{0.45\linewidth}
+    \includegraphics{right.png}
+    \caption{Right panel.}\label{fig:right}
+  \end{subfigure}
+  \caption{Two panels.}\label{fig:panels}
+\end{figure}
+
+\begin{table}[h]
+  \caption{Results.}\label{tab:results}
+  \begin{tabular}{lr}
+    Model & Score \\
+    A & 1 \\
+  \end{tabular}
+\end{table}
+
+\begin{algorithm}
+\caption{Gradient descent with clipping}\label{alg:gd}
+\begin{algorithmic}[1]
+\Require step size $\eta > 0$
+\Function{Train}{$D$}
+  \State $w \gets 0$ \Comment{start at zero}
+  \For{$t = 1, \dots, T$}\label{line:loop}
+    \If{$\|g_t\| > \tau$}
+      \State $g_t \gets \tau g_t / \|g_t\|$
+    \Else
+      \State \Call{Log}{$t$}
+    \EndIf
+    \State $w \gets w - \eta g_t$
+  \EndFor
+  \State \Return $w$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\Cref{alg:gd} loops in line~\ref{line:loop}.
+
+\begin{enumerate}
+  \item First\label{item:first}
+  \item Second\label{item:second}
+\end{enumerate}
+Item~\ref{item:second} matters.
+
+\begin{mystery}
+Content of an unknown environment is kept.
+\end{mystery}
+
+\appendix
+\section{Proofs}\label{sec:proofs}
+See \cref{sec:proofs} and \cref{def:sparse}.
+
+\end{document}

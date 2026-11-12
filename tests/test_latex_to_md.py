@@ -25,7 +25,8 @@ def test_math_and_citations(sample_tex):
     out = latex_to_md(sample_tex)
     assert "$\\ce{H2O}$" in out
     assert "$E = mc^2$" in out
-    assert "$$\\int_0^1 x^2 \\, dx = \\frac{1}{3}$$" in out
+    # 0.3.0: a numbered equation environment carries its number as \tag.
+    assert "$$\\int_0^1 x^2 \\, dx = \\frac{1}{3} \\tag{1}$$" in out
     assert "[@einstein1905]" in out
 
 

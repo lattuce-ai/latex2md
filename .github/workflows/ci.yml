@@ -8,8 +8,9 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.11", "3.13"]
+        python-version: ["3.11", "3.13", "3.14"]
         pandoc: ["apt", "3.6.4"]
     steps:
       - uses: actions/checkout@v4
@@ -27,3 +28,54 @@ jobs:
       - run: pandoc --version | head -1
       - run: pip install -e '.[dev]'
       - run: pytest -q
+
+  compile:
+    # Compiles generated LaTeX with a real TeX engine (scripts/compile_check.py).
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install pandoc and a small TeX Live
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pandoc latexmk \
+            texlive-latex-recommended texlive-latex-extra texlive-science lmodern
+      - run: pip install -e .
+      - run: python scripts/compile_check.py --keep compile-output
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: compile-output
+          path: compile-output/
+
+  corpus:
+    # Real arXiv papers (CC BY 4.0 / CC0), fetched by sha256 from tests/corpus/manifest.json.
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        pandoc: ["apt", "3.6.4"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install pandoc (Ubuntu package)
+        if: matrix.pandoc == 'apt'
+        run: sudo apt-get update && sudo apt-get install -y pandoc
+      - name: Install pandoc ${{ matrix.pandoc }} (upstream release)
+        if: matrix.pandoc != 'apt'
+        run: |
+          curl -fsSL -o pandoc.deb "https://github.com/jgm/pandoc/releases/download/${{ matrix.pandoc }}/pandoc-${{ matrix.pandoc }}-1-amd64.deb"
+          sudo dpkg -i pandoc.deb
+      - run: pip install -e '.[dev]'
+      - uses: actions/cache@v4
+        with:
+          path: tests/corpus/cache
+          key: corpus-${{ hashFiles('tests/corpus/manifest.json') }}
+      - run: python scripts/fetch_corpus.py
+      - run: pytest -q tests/test_corpus.py
+        env:
+          LATEX2MD_CORPUS: "1"

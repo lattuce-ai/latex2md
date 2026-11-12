@@ -76,3 +76,11 @@ def test_unwrap_pandocbounded_handles_nested_braces():
 def test_unwrap_pandocbounded_leaves_unbalanced_input():
     assert _unwrap_pandocbounded("\\pandocbounded{oops") == "\\pandocbounded{oops"
     assert _unwrap_pandocbounded("no images") == "no images"
+
+
+def test_standalone_declares_unicode_pdflatex_lacks():
+    out = md_to_latex("*Proof.* Done. ∎\n\n10\u2006000", standalone=True)
+    assert "\\ifdefined\\DeclareUnicodeCharacter\n  \\DeclareUnicodeCharacter{2006}{\\,}\n" in out
+    assert "\\DeclareUnicodeCharacter{220E}{\\leavevmode\\rule{1ex}{1ex}}\n\\fi\n" in out
+    assert "DeclareUnicodeCharacter" not in md_to_latex("plain", standalone=True)
+    assert "DeclareUnicodeCharacter" not in md_to_latex("∎")  # fragments: the caller's preamble decides
