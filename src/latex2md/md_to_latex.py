@@ -15,6 +15,33 @@ _HYPERTARGET_RE = re.compile(
 )
 _TIGHTLIST_RE = re.compile(r"^\\tightlist\n", re.M)
 _CITEP_RE = re.compile(r"\\citep(?=[\[{])")
+_PANDOCBOUNDED = "\\pandocbounded{"
+
+
+def _unwrap_pandocbounded(latex: str) -> str:
+    """pandoc >= 3.2 wraps images as \\pandocbounded{\\includegraphics...}.
+
+    The macro is defined only in pandoc's own template, so fragments keep just
+    the inner \\includegraphics (whose [keepaspectratio] needs only graphicx).
+    """
+    out: list[str] = []
+    i = 0
+    while (start := latex.find(_PANDOCBOUNDED, i)) != -1:
+        depth = 1
+        j = start + len(_PANDOCBOUNDED)
+        while j < len(latex) and depth:
+            if latex[j] == "\\":
+                j += 2
+                continue
+            depth += {"{": 1, "}": -1}.get(latex[j], 0)
+            j += 1
+        if depth:  # unbalanced: leave the rest untouched
+            break
+        out.append(latex[i:start])
+        out.append(latex[start + len(_PANDOCBOUNDED) : j - 1])
+        i = j
+    out.append(latex[i:])
+    return "".join(out)
 
 
 def _inject_package(latex: str, package_line: str) -> str:
@@ -45,6 +72,7 @@ def md_to_latex(markdown: str, *, standalone: bool = False) -> str:
     else:
         # Fragments must not depend on macros defined only in pandoc's template.
         latex = _TIGHTLIST_RE.sub("", latex)
+        latex = _unwrap_pandocbounded(latex)
         latex = _CITEP_RE.sub(r"\\cite", latex)
     latex = _BLANK_RUN_RE.sub("\n\n", latex)
     return latex.strip() + "\n"
