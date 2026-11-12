@@ -122,8 +122,27 @@ function Span(span)
   return span.content
 end
 
+-- citeproc's reference list (Div#refs of csl-entry Divs) becomes a
+-- "References" heading and a bullet list, like thebibliography. It is
+-- tagged here and moved to the \\bibliography position in Pandoc().
+local function references_block(div)
+  local items = {}
+  for _, entry in ipairs(div.content) do
+    local blocks = entry.t == "Div" and entry.content or { entry }
+    table.insert(items, { pandoc.Plain(pandoc.utils.blocks_to_inlines(blocks)) })
+  end
+  local blocks = { pandoc.Header(1, { pandoc.Str("References") }) }
+  if #items > 0 then
+    table.insert(blocks, pandoc.BulletList(items))
+  end
+  return pandoc.Div(blocks, pandoc.Attr("latex2md-references"))
+end
+
 -- Divs (table/figure wrappers, environments) are unwrapped.
 function Div(div)
+  if div.identifier == "refs" then
+    return references_block(div)
+  end
   return div.content
 end
 
@@ -235,6 +254,37 @@ local function resolve_anchors(doc, enabled)
   })
 end
 
+-- With --citeproc, pandoc >= 3.2 writes rendered citations even when the
+-- citations extension is on. To keep [@key] on every version, write each
+-- citation with a citeproc-free writer and emit it as raw Markdown.
+local function citations_as_markdown(cite)
+  local doc = pandoc.Pandoc({ pandoc.Plain({ pandoc.Cite({}, cite.citations) }) })
+  local text = pandoc.write(doc, "markdown", pandoc.WriterOptions({ wrap_text = "wrap-none" }))
+  return pandoc.RawInline("markdown", (text:gsub("%s+$", "")))
+end
+
+local function place_references(doc)
+  local references, position
+  local blocks = pandoc.List()
+  for _, block in ipairs(doc.blocks) do
+    if block.t == "Div" and block.identifier == "latex2md-references" then
+      references = block.content
+    elseif block.t == "Para" and #block.content == 1 and block.content[1].t == "Str"
+        and block.content[1].text == "LATEX2MDREFERENCES" then
+      position = position or #blocks + 1
+    else
+      blocks:insert(block)
+    end
+  end
+  if references then
+    for i, block in ipairs(references) do
+      blocks:insert((position or #blocks + 1) + i - 1, block)
+    end
+  end
+  doc.blocks = blocks
+  return doc
+end
+
 -- Title/author/abstract live in metadata. With front matter disabled, move
 -- the abstract into the body so it is not lost.
 function Pandoc(doc)
@@ -247,7 +297,23 @@ function Pandoc(doc)
     doc.blocks = body
   end
   local anchors = doc.meta.latex2md_anchors and true or false
-  doc.meta.latex2md_body_abstract = nil
-  doc.meta.latex2md_anchors = nil
-  return resolve_anchors(doc, anchors)
+  local citeproc = doc.meta.latex2md_citeproc and true or false
+  local rendered = doc.meta.latex2md_cite_rendered and true or false
+  for _, key in ipairs({ "latex2md_body_abstract", "latex2md_anchors", "latex2md_citeproc", "latex2md_cite_rendered" }) do
+    doc.meta[key] = nil
+  end
+  if citeproc then
+    -- These point at latex2md's temporary copies.
+    doc.meta.bibliography = nil
+    doc.meta.csl = nil
+    doc = doc:walk({
+      Cite = function(cite)
+        if rendered then
+          return cite.content
+        end
+        return citations_as_markdown(cite)
+      end,
+    })
+  end
+  return resolve_anchors(place_references(doc), anchors)
 end

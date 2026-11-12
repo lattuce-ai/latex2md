@@ -71,6 +71,15 @@ def build_parser() -> argparse.ArgumentParser:
                 "--base-dir",
                 help="folder that \\input/\\include may read from (default: the input file's folder, or cwd for stdin)",
             )
+        if name in ("to-md", "auto"):
+            cmd.add_argument("--anchors", action="store_true", help="link section references to heading ids")
+            cmd.add_argument("--csl", help="CSL style for references from a .bib (inside --base-dir)")
+            cmd.add_argument(
+                "--cite-style",
+                choices=("keep", "rendered"),
+                default="keep",
+                help="keep [@key] (default) or write citeproc's rendered citations",
+            )
         if name in ("to-latex", "auto"):
             cmd.add_argument("--standalone", action="store_true", help="emit a complete LaTeX document")
         cmd.add_argument("--strict", action="store_true", help="exit with status 1 if there are any warnings")
@@ -111,12 +120,15 @@ def main(argv: list[str] | None = None) -> int:
         direction = _direction(args.command, args.input)
         if direction == "to-latex":
             result = convert_md_to_latex(_read(args.input), standalone=getattr(args, "standalone", False))
-        elif _is_archive(args.input):
-            result = convert_latex_archive_to_md(Path(args.input).read_bytes())
-        elif args.input == "-":
-            result = convert_latex_to_md(_read(args.input), base_dir=args.base_dir or Path.cwd())
         else:
-            result = convert_latex_file_to_md(args.input, base_dir=args.base_dir)
+            options = {"anchors": args.anchors, "cite_style": args.cite_style}
+            if _is_archive(args.input):
+                result = convert_latex_archive_to_md(Path(args.input).read_bytes(), **options)
+            elif args.input == "-":
+                base_dir = args.base_dir or Path.cwd()
+                result = convert_latex_to_md(_read(args.input), base_dir=base_dir, csl=args.csl, **options)
+            else:
+                result = convert_latex_file_to_md(args.input, base_dir=args.base_dir, csl=args.csl, **options)
         _write(args.output, result.text)
     except (ConversionError, OSError) as exc:
         print(f"latex2md: {exc}", file=sys.stderr)

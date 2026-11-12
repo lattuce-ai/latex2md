@@ -50,6 +50,8 @@ latex2md flatten main.tex -o flat.tex          # one .tex with includes inlined
 - `--standalone` (for `to-latex` and `auto`) writes a complete document with a preamble.
 - `--base-dir DIR` (for `to-md` and `auto`) is the folder `\input`/`\include` may read from.
   It defaults to the input file's folder (or the current folder for stdin).
+- `--anchors`, `--cite-style keep|rendered` and `--csl FILE` (for `to-md` and `auto`)
+  match the Python options below.
 - Warnings (see below) are printed to stderr; `--quiet` hides them and `--strict`
   exits with status 1 when there are any.
 
@@ -163,7 +165,7 @@ commands in the preamble are not reported.
 | Theorems (amsthm) | — | `**Theorem 1 (Name).** body`, numbered per `\newtheorem`; `proof` → `*Proof.* … ∎` |
 | Algorithms | — | "**Algorithm 1:** caption" + a fenced `text` block of indented pseudo-code |
 | Unknown environments | — | content kept, `unknown_environment` warning |
-| Bibliography | — | `thebibliography` → "References" list; a sibling `.bbl` fills `\bibliography{}` |
+| Bibliography | — | `thebibliography` → "References" list; a sibling `.bbl` fills `\bibliography{}`; otherwise a `.bib` in the project is rendered by citeproc (see below) |
 
 Fragment output (the default) avoids macros that only pandoc's template defines
 (`\tightlist`, `Shaded`, `\hypertarget`), so it compiles in an ordinary preamble.
@@ -177,6 +179,34 @@ inlines includes only when they resolve inside the base folder. Absolute paths,
 more than 20 MB of included files are skipped. Without a base folder, include
 commands are removed. Archives are unpacked under the limits above. This makes
 it safe to run on untrusted uploads.
+
+## Bibliographies
+
+A compiled `.bbl` (arXiv ships one next to the main file) is used as is. When
+there is none, the `.bib` files named by `\bibliography{refs}` or
+`\addbibresource{refs.bib}` are looked up inside the base folder and rendered
+by pandoc's citeproc as a "References" list where `\bibliography`/`\printbibliography`
+stood:
+
+```python
+md = latex_file_to_md("paper/main.tex")                           # [@key] kept in the text
+md = latex_file_to_md("paper/main.tex", cite_style="rendered")    # "(Knuth 1984)"
+md = latex_file_to_md("paper/main.tex", csl="paper/ieee.csl")      # a CSL style; default: pandoc's built-in
+md = latex_to_md(tex_text, base_dir="paper/")                     # works for text input too
+```
+
+```bash
+latex2md to-md paper/main.tex --cite-style rendered --csl paper/ieee.csl
+```
+
+The `.bib` must be a regular file inside the base folder (no absolute paths,
+`..` or symlinks out; at most 10 MB and 16 files), and `csl` must be an
+existing file inside the base folder when one is given; otherwise the `.bib`
+is reported as `missing_bibliography` and an unsafe `csl` raises
+`ConversionError`. pandoc rejects a whole `.bib` for one bad entry, so
+malformed entries (unbalanced braces, no key, or anything pandoc cannot parse)
+are left out and reported as `bibliography` warnings; if the file is still
+unreadable, the conversion continues without citeproc.
 
 ## Numbering and cross-references
 
@@ -214,7 +244,6 @@ tables, so references to those stay text.
   unknown commands are dropped.
 - Pseudo-code in algorithms is not macro-expanded, and `subequations` are numbered
   as ordinary equations.
-- Bibliographies from `.bib` files need the compiled `.bbl`; citations stay as `[@key]`.
 - Figures with `\includegraphics` keep the path; image files are not copied.
 
 ## Settings

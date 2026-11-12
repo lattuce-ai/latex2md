@@ -2,12 +2,29 @@
 from __future__ import annotations
 
 import re
+import tempfile
 from importlib import resources
 from pathlib import Path
+from typing import Literal
 
 from latex2md.archive import ArchiveLimits, extract_archive
+from latex2md.bibliography import (
+    BIB_COMMAND_RE,
+    PRINT_BIBLIOGRAPHY_RE,
+    BibFiles,
+    checked_file,
+    drop_entry_at_line,
+    failing_entry,
+    find_bib_files,
+    sanitize_bib,
+)
 from latex2md.flatten import flatten_source, read_tex, sibling_bbl
-from latex2md.pandoc import MARKDOWN_OUT, pandoc_messages, run_pandoc_output
+from latex2md.pandoc import (
+    MARKDOWN_OUT,
+    ConversionError,
+    pandoc_messages,
+    run_pandoc_output,
+)
 from latex2md.result import ConversionResult, WarningLog
 from latex2md.structure import resolve_structure
 
@@ -23,8 +40,10 @@ _LUA_FILTER = "latex_to_md.lua"
 _THEBIBLIOGRAPHY_BEGIN_RE = re.compile(r"\\begin\{thebibliography\}\s*\{[^{}]*\}")
 _THEBIBLIOGRAPHY_END_RE = re.compile(r"\\end\{thebibliography\}")
 _BIBITEM_RE = re.compile(r"\\bibitem\s*(?:\[[^\]]*\])?\s*\{[^{}]*\}")
-_BIB_COMMAND_RE = re.compile(r"\\(?:bibliography|addbibresource)\s*(?:\[[^\]]*\])?\s*\{([^{}]*)\}")
 _BEGIN_DOCUMENT = "\\begin{document}"
+# Where citeproc's reference list goes; the Lua filter swaps it in.
+_REFERENCES_PLACEHOLDER = "\\par LATEX2MDREFERENCES\\par "
+CiteStyle = Literal["keep", "rendered"]
 _FENCE_CLASS_RE = re.compile(r"^(\s*)(`{3,}|~{3,}) (\w[\w-]*)$")
 _EMPTY_TABLE_ROW_RE = re.compile(r"^\|(?:\s*\|)+$")
 _TABLE_RULE_RE = re.compile(r"^\|(?:\s*:?-+:?\s*\|)+$")
@@ -80,6 +99,54 @@ def _body_start_line(source: str) -> int:
     return source.count("\n", 0, index) + 1 if index != -1 else 0
 
 
+def _place_references(source: str) -> str:
+    """Mark where the reference list goes and drop the bibliography commands.
+
+    pandoc would otherwise put the list at the very end and try to read the
+    named ``.bib`` itself; latex2md passes the checked file instead.
+    """
+    marker = PRINT_BIBLIOGRAPHY_RE if PRINT_BIBLIOGRAPHY_RE.search(source) else re.compile(r"\\bibliography\s*\{[^{}]*\}")
+    begin = source.find(_BEGIN_DOCUMENT)
+    match = marker.search(source, max(begin, 0))
+    if match:
+        source = source[: match.start()] + _REFERENCES_PLACEHOLDER + source[match.end() :]
+    return PRINT_BIBLIOGRAPHY_RE.sub("", BIB_COMMAND_RE.sub("", source))
+
+
+def _write_bibliographies(bibs: BibFiles, folder: Path, warnings: WarningLog) -> dict[str, str]:
+    """Sanitised copies of the ``.bib`` files: {copy path: original name}."""
+    copies: dict[str, str] = {}
+    for index, path in enumerate(bibs.paths):
+        text, problems = sanitize_bib(path.read_text(encoding="utf-8", errors="replace"))
+        for problem in problems:
+            warnings.add("bibliography", f"{path.name}: {problem}")
+        copy = folder / f"bibliography-{index}.bib"
+        copy.write_text(text, encoding="utf-8")
+        copies[str(copy)] = path.name
+    return copies
+
+
+def _drop_failing_entry(stderr: str, copies: dict[str, str], warnings: WarningLog) -> bool:
+    """Remove the entry pandoc could not parse from its copy; False if unknown."""
+    failure = failing_entry(stderr)
+    if failure is None:
+        return False
+    name, line = failure
+    copy = next((c for c in copies if c == name or c.endswith(name) or name.endswith(Path(c).name)), None)
+    if copy is None:
+        return False
+    dropped = drop_entry_at_line(Path(copy).read_text(encoding="utf-8"), line)
+    if dropped is None:
+        return False
+    text, head = dropped
+    Path(copy).write_text(text, encoding="utf-8")
+    warnings.add("bibliography", f"{copies[copy]}: {head}: pandoc could not parse this entry")
+    return True
+
+
+_MAX_BIB_RETRIES = 20
+
+
 def convert_latex_to_md(
     latex: str,
     *,
@@ -87,36 +154,71 @@ def convert_latex_to_md(
     front_matter: bool = True,
     bbl: str | None = None,
     anchors: bool = False,
+    csl: str | Path | None = None,
+    cite_style: CiteStyle = "keep",
 ) -> ConversionResult:
     """Convert LaTeX to Markdown and report what could not be carried over.
 
     Takes the same arguments as :func:`latex_to_md` and returns a
     :class:`~latex2md.result.ConversionResult` whose ``warnings`` list skipped
-    includes, commands and environments pandoc did not know, and missing
-    bibliographies.
+    includes, commands and environments pandoc did not know, unresolved
+    references and missing or malformed bibliographies.
     """
+    if cite_style not in ("keep", "rendered"):
+        raise ValueError(f"cite_style must be 'keep' or 'rendered', not {cite_style!r}")
     warnings = WarningLog()
     source = flatten_source(latex, base_dir=base_dir, bbl=bbl, warnings=warnings)
-    if bbl is None:
-        for match in _BIB_COMMAND_RE.finditer(source):
-            warnings.add(
-                "missing_bibliography",
-                f"{match.group(0)}: no .bbl given, so citations stay as [@key]",
-            )
+    bibs = BibFiles() if bbl is not None else find_bib_files(source, base_dir)
+    warnings.extend_unique(bibs.warnings)
+    style = checked_file(csl, base_dir, what="CSL style") if csl is not None else None
     source, structure_warnings = resolve_structure(_bibliography_as_list(source), anchors=anchors)
     warnings.extend_unique(structure_warnings)
     args = ["--wrap=none", "--verbose"]
     args.append("--standalone" if front_matter else "--metadata=latex2md_body_abstract:true")
     if anchors:
         args.append("--metadata=latex2md_anchors:true")
-    with resources.as_file(resources.files("latex2md") / _LUA_FILTER) as lua_filter:
-        output = run_pandoc_output(
-            source,
-            from_format="latex",
-            to_format=MARKDOWN_OUT,
-            extra_args=[*args, f"--lua-filter={lua_filter}"],
-        )
-    warnings.extend_unique(pandoc_messages(output.stderr, body_start_line=_body_start_line(source)))
+    with (
+        tempfile.TemporaryDirectory(prefix="latex2md-bib-") as folder,
+        resources.as_file(resources.files("latex2md") / _LUA_FILTER) as lua_filter,
+    ):
+        cite_args: list[str] = []
+        cited_source = source
+        copies: dict[str, str] = {}
+        if bibs.paths:
+            copies = _write_bibliographies(bibs, Path(folder), warnings)
+            cite_args = ["--citeproc", *(f"--bibliography={copy}" for copy in copies)]
+            cite_args.append("--metadata=latex2md_citeproc:true")
+            if style is not None:
+                cite_args.append(f"--csl={style}")
+            if cite_style == "rendered":
+                cite_args.append("--metadata=latex2md_cite_rendered:true")
+            cited_source = _place_references(source)
+
+        def run(text: str, extra: list[str]):
+            return run_pandoc_output(
+                text,
+                from_format="latex",
+                to_format=MARKDOWN_OUT,
+                extra_args=[*args, *extra, f"--lua-filter={lua_filter}"],
+            )
+
+        output = None
+        for _ in range(_MAX_BIB_RETRIES):
+            try:
+                output = run(cited_source, cite_args)
+                break
+            except ConversionError as exc:
+                if not cite_args or "bibliography" not in str(exc).lower():
+                    raise
+                # pandoc rejects a whole .bib for one bad entry: drop it and retry.
+                if not _drop_failing_entry(exc.stderr or str(exc), copies, warnings):
+                    break
+        if output is None:
+            # Still unreadable: convert without citeproc rather than lose the paper.
+            warnings.add("bibliography", "pandoc could not read the bibliography; citations stay as [@key]")
+            cited_source = source
+            output = run(source, [])
+    warnings.extend_unique(pandoc_messages(output.stderr, body_start_line=_body_start_line(cited_source)))
     return ConversionResult(_clean_markdown(output.stdout), list(warnings))
 
 
@@ -127,6 +229,8 @@ def latex_to_md(
     front_matter: bool = True,
     bbl: str | None = None,
     anchors: bool = False,
+    csl: str | Path | None = None,
+    cite_style: CiteStyle = "keep",
 ) -> str:
     """Convert LaTeX (a full document or a fragment) to Markdown.
 
@@ -139,7 +243,14 @@ def latex_to_md(
 
     ``front_matter=True`` writes title/author/date/abstract as YAML front matter;
     ``False`` drops title/author and puts the abstract under an "Abstract"
-    heading. ``bbl`` (compiled bibliography) replaces ``\\bibliography{...}``.
+    heading.
+
+    Bibliography: ``bbl`` (compiled bibliography) replaces ``\\bibliography{...}``.
+    Without it, a ``.bib`` named by ``\\bibliography``/``\\addbibresource`` inside
+    ``base_dir`` is rendered by pandoc's citeproc as a "References" section,
+    in pandoc's default style or the CSL file ``csl`` (which must be inside
+    ``base_dir`` when one is given). ``cite_style="keep"`` leaves ``[@key]`` in
+    the text; ``"rendered"`` writes citeproc's in-text citations instead.
 
     Display equations, sections, figures, tables, theorems and algorithms are
     numbered as LaTeX would number them; ``\\ref``/``\\eqref``/``\\cref`` become
@@ -148,7 +259,15 @@ def latex_to_md(
 
     Use :func:`convert_latex_to_md` to also get the conversion warnings.
     """
-    return convert_latex_to_md(latex, base_dir=base_dir, front_matter=front_matter, bbl=bbl, anchors=anchors).text
+    return convert_latex_to_md(
+        latex,
+        base_dir=base_dir,
+        front_matter=front_matter,
+        bbl=bbl,
+        anchors=anchors,
+        csl=csl,
+        cite_style=cite_style,
+    ).text
 
 
 def convert_latex_file_to_md(
@@ -157,6 +276,8 @@ def convert_latex_file_to_md(
     base_dir: str | Path | None = None,
     front_matter: bool = True,
     anchors: bool = False,
+    csl: str | Path | None = None,
+    cite_style: CiteStyle = "keep",
 ) -> ConversionResult:
     """:func:`latex_file_to_md`, returning a :class:`~latex2md.result.ConversionResult`."""
     path = Path(path)
@@ -166,6 +287,8 @@ def convert_latex_file_to_md(
         front_matter=front_matter,
         bbl=sibling_bbl(path),
         anchors=anchors,
+        csl=csl,
+        cite_style=cite_style,
     )
 
 
@@ -175,13 +298,19 @@ def latex_file_to_md(
     base_dir: str | Path | None = None,
     front_matter: bool = True,
     anchors: bool = False,
+    csl: str | Path | None = None,
+    cite_style: CiteStyle = "keep",
 ) -> str:
     """Convert a ``.tex`` file.
 
-    Includes resolve under its folder (or ``base_dir``), and a sibling ``.bbl``
-    with the same name, as shipped in arXiv sources, fills in the bibliography.
+    Includes resolve under its folder (or ``base_dir``). A sibling ``.bbl``
+    with the same name, as shipped in arXiv sources, fills in the
+    bibliography; otherwise a ``.bib`` inside the folder is used (see
+    :func:`latex_to_md`).
     """
-    return convert_latex_file_to_md(path, base_dir=base_dir, front_matter=front_matter, anchors=anchors).text
+    return convert_latex_file_to_md(
+        path, base_dir=base_dir, front_matter=front_matter, anchors=anchors, csl=csl, cite_style=cite_style
+    ).text
 
 
 def convert_latex_archive_to_md(
@@ -190,6 +319,7 @@ def convert_latex_archive_to_md(
     front_matter: bool = True,
     limits: ArchiveLimits | None = None,
     anchors: bool = False,
+    cite_style: CiteStyle = "keep",
 ) -> ConversionResult:
     """:func:`latex_archive_to_md`, returning a :class:`~latex2md.result.ConversionResult`.
 
@@ -197,7 +327,7 @@ def convert_latex_archive_to_md(
     """
     with extract_archive(data, limits=limits) as archive:
         result = convert_latex_file_to_md(
-            archive.main_tex, base_dir=archive.root, front_matter=front_matter, anchors=anchors
+            archive.main_tex, base_dir=archive.root, front_matter=front_matter, anchors=anchors, cite_style=cite_style
         )
     warnings = WarningLog(result.warnings)
     for message in archive.skipped:
@@ -211,11 +341,15 @@ def latex_archive_to_md(
     front_matter: bool = True,
     limits: ArchiveLimits | None = None,
     anchors: bool = False,
+    cite_style: CiteStyle = "keep",
 ) -> str:
     """Convert an arXiv-style source archive (zip, tar, tar.gz, gzip'd or bare ``.tex``).
 
     The archive is unpacked into a private temporary folder under ``limits``
     (see :class:`~latex2md.archive.ArchiveLimits`), the main file is picked as
-    LaTeX would be run on it, and it is converted like :func:`latex_file_to_md`.
+    LaTeX would be run on it, and it is converted like :func:`latex_file_to_md`
+    (a ``.bbl`` or, failing that, a ``.bib`` in the archive gives the references).
     """
-    return convert_latex_archive_to_md(data, front_matter=front_matter, limits=limits, anchors=anchors).text
+    return convert_latex_archive_to_md(
+        data, front_matter=front_matter, limits=limits, anchors=anchors, cite_style=cite_style
+    ).text
