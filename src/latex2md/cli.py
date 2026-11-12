@@ -73,7 +73,8 @@ def build_parser() -> argparse.ArgumentParser:
             )
         if name in ("to-md", "auto"):
             cmd.add_argument("--anchors", action="store_true", help="link section references to heading ids")
-            cmd.add_argument("--csl", help="CSL style for references from a .bib (inside --base-dir)")
+            cmd.add_argument("--csl", help="CSL style: for to-md, references from a .bib (inside --base-dir); "
+                             "for to-latex, --citations citeproc")
             cmd.add_argument(
                 "--cite-style",
                 choices=("keep", "rendered"),
@@ -82,6 +83,28 @@ def build_parser() -> argparse.ArgumentParser:
             )
         if name in ("to-latex", "auto"):
             cmd.add_argument("--standalone", action="store_true", help="emit a complete LaTeX document")
+            cmd.add_argument("--template", help="pandoc LaTeX template (implies --standalone)")
+            cmd.add_argument(
+                "-V",
+                "--variable",
+                action="append",
+                default=[],
+                metavar="KEY=VALUE",
+                help="template variable; repeat for more",
+            )
+            cmd.add_argument("--bibliography", help=".bib or CSL JSON file for citations")
+            cmd.add_argument(
+                "--citations",
+                choices=("cite", "natbib", "biblatex", "citeproc"),
+                default="cite",
+                help="how [@key] is written (default: cite)",
+            )
+            cmd.add_argument("--resource-dir", help="folder images must be inside")
+            cmd.add_argument(
+                "--allow-remote-images", action="store_true", help="keep http(s) images instead of dropping them"
+            )
+            if name == "to-latex":
+                cmd.add_argument("--csl", help="CSL style for --citations citeproc")
         cmd.add_argument("--strict", action="store_true", help="exit with status 1 if there are any warnings")
         cmd.add_argument("-q", "--quiet", action="store_true", help="do not print warnings")
     return parser
@@ -92,6 +115,25 @@ def _report(result: ConversionResult, args: argparse.Namespace) -> int:
         for warning in result.warnings:
             print(f"latex2md: warning: {warning}", file=sys.stderr)
     return 1 if args.strict and result.warnings else 0
+
+
+def _latex_options(args: argparse.Namespace) -> dict:
+    variables = {}
+    for item in args.variable:
+        key, sep, value = item.partition("=")
+        if not sep:
+            key, sep, value = item.partition(":")
+        variables[key] = value
+    return {
+        "standalone": args.standalone,
+        "template": args.template,
+        "variables": variables,
+        "bibliography": args.bibliography,
+        "citations": args.citations,
+        "csl": args.csl,
+        "resource_dir": args.resource_dir,
+        "allow_remote_images": args.allow_remote_images,
+    }
 
 
 def _flatten(args: argparse.Namespace) -> ConversionResult:
@@ -119,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
             return _report(result, args)
         direction = _direction(args.command, args.input)
         if direction == "to-latex":
-            result = convert_md_to_latex(_read(args.input), standalone=getattr(args, "standalone", False))
+            result = convert_md_to_latex(_read(args.input), **_latex_options(args))
         else:
             options = {"anchors": args.anchors, "cite_style": args.cite_style}
             if _is_archive(args.input):
@@ -130,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 result = convert_latex_file_to_md(args.input, base_dir=args.base_dir, csl=args.csl, **options)
         _write(args.output, result.text)
-    except (ConversionError, OSError) as exc:
+    except (ConversionError, OSError, ValueError) as exc:
         print(f"latex2md: {exc}", file=sys.stderr)
         return 1
     return _report(result, args)

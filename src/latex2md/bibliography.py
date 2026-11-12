@@ -13,11 +13,16 @@ checked by :func:`checked_file`.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TypeVar
 
 from latex2md.pandoc import ConversionError
-from latex2md.result import ConversionWarning
+from latex2md.result import ConversionWarning, WarningLog
+
+T = TypeVar("T")
+MAX_BIB_RETRIES = 20
 
 MAX_BIB_BYTES = 10 * 1024 * 1024
 MAX_BIB_FILES = 16
@@ -151,3 +156,57 @@ def drop_entry_at_line(text: str, line: int) -> tuple[str, str] | None:
     end = following[0] if following else len(text)
     head = text[start:end].strip().splitlines()[0][:60]
     return text[:start] + text[end:], head
+
+
+class BibCopies:
+    """Sanitised temporary copies of ``.bib`` files that pandoc reads.
+
+    :meth:`run` retries a pandoc call, dropping each entry pandoc reports as
+    unparseable, so one bad entry costs one reference instead of all of them.
+    CSL JSON files are passed through unchanged.
+    """
+
+    def __init__(self, paths: list[Path], folder: Path, warnings: WarningLog) -> None:
+        self.warnings = warnings
+        self.copies: dict[str, str] = {}
+        for index, path in enumerate(paths):
+            if path.suffix.lower() != ".bib":
+                self.copies[str(path)] = path.name
+                continue
+            text, problems = sanitize_bib(path.read_text(encoding="utf-8", errors="replace"))
+            for problem in problems:
+                warnings.add("bibliography", f"{path.name}: {problem}")
+            copy = folder / f"bibliography-{index}.bib"
+            copy.write_text(text, encoding="utf-8")
+            self.copies[str(copy)] = path.name
+
+    def args(self) -> list[str]:
+        return [f"--bibliography={copy}" for copy in self.copies]
+
+    def _drop_failing_entry(self, stderr: str) -> bool:
+        failure = failing_entry(stderr)
+        if failure is None:
+            return False
+        name, line = failure
+        copy = next((c for c in self.copies if c == name or Path(c).name == Path(name).name), None)
+        if copy is None or not copy.endswith(".bib") or Path(copy).name == self.copies[copy]:
+            return False
+        dropped = drop_entry_at_line(Path(copy).read_text(encoding="utf-8"), line)
+        if dropped is None:
+            return False
+        text, head = dropped
+        Path(copy).write_text(text, encoding="utf-8")
+        self.warnings.add("bibliography", f"{self.copies[copy]}: {head}: pandoc could not parse this entry")
+        return True
+
+    def run(self, call: Callable[[list[str]], T]) -> T | None:
+        """``call(bibliography_args)``; None when pandoc still cannot read them."""
+        for _ in range(MAX_BIB_RETRIES):
+            try:
+                return call(self.args())
+            except ConversionError as exc:
+                if "bibliography" not in str(exc).lower():
+                    raise
+                if not self._drop_failing_entry(exc.stderr or str(exc)):
+                    return None
+        return None

@@ -151,7 +151,7 @@ commands in the preamble are not reported.
 | Headings | `\section{}` + `\label{}` | `#`, `##`, … (labels dropped) |
 | Math | `\( \)` and `\[ \]` | `$…$` and `$$…$$` |
 | Chemistry (`\ce{}`) | kept; `--standalone` loads `mhchem` | kept inside math |
-| Citations | `[@key]` → `\cite{key}` | `\cite{key}` → `[@key]` |
+| Citations | `[@key]` → `\cite{key}` (or natbib, biblatex, citeproc) | `\cite{key}` → `[@key]` (or rendered by citeproc) |
 | Lists | `itemize` / `enumerate` | tight `-` / `1.` lists |
 | Tables | `longtable` (needs `longtable` + `booktabs`) | pipe tables; first row becomes header |
 | Code | `verbatim` | fenced blocks |
@@ -159,6 +159,8 @@ commands in the preamble are not reported.
 | Multi-file projects | — | `\input`, `\include`, `\subfile`, `\import`, `\lstinputlisting` inlined from the project folder |
 | Title, authors, abstract | — | YAML front matter, or an "Abstract" section with `front_matter=False` |
 | Macros (`\newcommand`) | — | expanded |
+| Images | checked against `resource_dir` (see below) | path kept |
+| Templates | `template=` + `variables=` | — |
 | Floats | — | `figure` → image with "Figure 2: caption" as alt text; subfigures → one image each with "(a) caption", then "**Figure 2:** caption"; `table` → "**Table 1:** caption" + pipe table |
 | Equation numbers | — | numbered as in LaTeX, written as `\tag{n}` (see below) |
 | Cross-references | — | `\ref`, `\eqref`, `\autoref`, `\cref`, `\Cref`, `\subref` → the number LaTeX would print |
@@ -179,6 +181,51 @@ inlines includes only when they resolve inside the base folder. Absolute paths,
 more than 20 MB of included files are skipped. Without a base folder, include
 commands are removed. Archives are unpacked under the limits above. This makes
 it safe to run on untrusted uploads.
+
+## Markdown → LaTeX options
+
+```python
+tex = md_to_latex(
+    markdown_text,
+    template="paper/template.latex",          # a pandoc template; implies standalone
+    variables={"classoption": "twocolumn"},    # its $variables$
+    citations="citeproc",                      # "cite" (default), "natbib", "biblatex", "citeproc"
+    bibliography="paper/refs.bib",             # .bib or CSL JSON
+    csl="paper/ieee.csl",                      # citeproc style
+    resource_dir="paper/",                     # images, template, bibliography and CSL must be inside
+    allow_remote_images=False,                 # default
+)
+```
+
+```bash
+latex2md to-latex notes.md --template t.latex -V classoption=twocolumn \
+    --citations citeproc --bibliography refs.bib --csl ieee.csl --resource-dir .
+```
+
+| `citations` | `[@a; @b]` / `@a` become | Bibliography |
+|---|---|---|
+| `cite` (default) | `\cite{a, b}` / `\citet{a}` | — |
+| `natbib` | `\citep{a, b}` / `\citet{a}` | standalone: `\bibliography{refs}` |
+| `biblatex` | `\autocite{a,b}` / `\textcite{a}` | standalone: `\addbibresource{refs.bib}` + `\printbibliography` |
+| `citeproc` | rendered text, e.g. "(Knuth 1984)" | a "References" list (needs `bibliography`) |
+
+`.bib` files go through the same malformed-entry handling as LaTeX → Markdown.
+
+**Images** are checked before pandoc writes LaTeX, so the output never points
+the TeX run at files it should not read:
+
+- `data:` URIs pass the check, but pandoc's LaTeX writer cannot embed them, so
+  they are reported as `dropped_image` too;
+- local paths are kept when they resolve (symlinks included) to an existing
+  file inside `resource_dir`; without `resource_dir`, relative paths that do
+  not climb out with `..` are kept;
+- `http(s)` URLs are kept only with `allow_remote_images=True`;
+- everything else (absolute paths, `..`, `file:` and other schemes) is
+  replaced by its alt text (a figure keeps its caption) and reported as a
+  `dropped_image` warning.
+
+`template`, `bibliography` and `csl` must be existing regular files, inside
+`resource_dir` when one is given; otherwise `ConversionError` is raised.
 
 ## Bibliographies
 

@@ -11,17 +11,15 @@ from latex2md.archive import ArchiveLimits, extract_archive
 from latex2md.bibliography import (
     BIB_COMMAND_RE,
     PRINT_BIBLIOGRAPHY_RE,
+    BibCopies,
     BibFiles,
     checked_file,
-    drop_entry_at_line,
-    failing_entry,
     find_bib_files,
-    sanitize_bib,
 )
 from latex2md.flatten import flatten_source, read_tex, sibling_bbl
 from latex2md.pandoc import (
     MARKDOWN_OUT,
-    ConversionError,
+    PandocOutput,
     pandoc_messages,
     run_pandoc_output,
 )
@@ -113,40 +111,6 @@ def _place_references(source: str) -> str:
     return PRINT_BIBLIOGRAPHY_RE.sub("", BIB_COMMAND_RE.sub("", source))
 
 
-def _write_bibliographies(bibs: BibFiles, folder: Path, warnings: WarningLog) -> dict[str, str]:
-    """Sanitised copies of the ``.bib`` files: {copy path: original name}."""
-    copies: dict[str, str] = {}
-    for index, path in enumerate(bibs.paths):
-        text, problems = sanitize_bib(path.read_text(encoding="utf-8", errors="replace"))
-        for problem in problems:
-            warnings.add("bibliography", f"{path.name}: {problem}")
-        copy = folder / f"bibliography-{index}.bib"
-        copy.write_text(text, encoding="utf-8")
-        copies[str(copy)] = path.name
-    return copies
-
-
-def _drop_failing_entry(stderr: str, copies: dict[str, str], warnings: WarningLog) -> bool:
-    """Remove the entry pandoc could not parse from its copy; False if unknown."""
-    failure = failing_entry(stderr)
-    if failure is None:
-        return False
-    name, line = failure
-    copy = next((c for c in copies if c == name or c.endswith(name) or name.endswith(Path(c).name)), None)
-    if copy is None:
-        return False
-    dropped = drop_entry_at_line(Path(copy).read_text(encoding="utf-8"), line)
-    if dropped is None:
-        return False
-    text, head = dropped
-    Path(copy).write_text(text, encoding="utf-8")
-    warnings.add("bibliography", f"{copies[copy]}: {head}: pandoc could not parse this entry")
-    return True
-
-
-_MAX_BIB_RETRIES = 20
-
-
 def convert_latex_to_md(
     latex: str,
     *,
@@ -183,18 +147,16 @@ def convert_latex_to_md(
     ):
         cite_args: list[str] = []
         cited_source = source
-        copies: dict[str, str] = {}
+        copies = BibCopies(bibs.paths, Path(folder), warnings)
         if bibs.paths:
-            copies = _write_bibliographies(bibs, Path(folder), warnings)
-            cite_args = ["--citeproc", *(f"--bibliography={copy}" for copy in copies)]
-            cite_args.append("--metadata=latex2md_citeproc:true")
+            cite_args = ["--citeproc", "--metadata=latex2md_citeproc:true"]
             if style is not None:
                 cite_args.append(f"--csl={style}")
             if cite_style == "rendered":
                 cite_args.append("--metadata=latex2md_cite_rendered:true")
             cited_source = _place_references(source)
 
-        def run(text: str, extra: list[str]):
+        def run(text: str, extra: list[str]) -> PandocOutput:
             return run_pandoc_output(
                 text,
                 from_format="latex",
@@ -202,20 +164,10 @@ def convert_latex_to_md(
                 extra_args=[*args, *extra, f"--lua-filter={lua_filter}"],
             )
 
-        output = None
-        for _ in range(_MAX_BIB_RETRIES):
-            try:
-                output = run(cited_source, cite_args)
-                break
-            except ConversionError as exc:
-                if not cite_args or "bibliography" not in str(exc).lower():
-                    raise
-                # pandoc rejects a whole .bib for one bad entry: drop it and retry.
-                if not _drop_failing_entry(exc.stderr or str(exc), copies, warnings):
-                    break
+        output = copies.run(lambda bib_args: run(cited_source, [*cite_args, *bib_args])) if cite_args else None
         if output is None:
-            # Still unreadable: convert without citeproc rather than lose the paper.
-            warnings.add("bibliography", "pandoc could not read the bibliography; citations stay as [@key]")
+            if cite_args:
+                warnings.add("bibliography", "pandoc could not read the bibliography; citations stay as [@key]")
             cited_source = source
             output = run(source, [])
     warnings.extend_unique(pandoc_messages(output.stderr, body_start_line=_body_start_line(cited_source)))

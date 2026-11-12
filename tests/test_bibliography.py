@@ -1,6 +1,5 @@
 import io
 import shutil
-import sys
 import tarfile
 from pathlib import Path
 
@@ -120,8 +119,7 @@ def test_oversized_bib_is_refused(project, monkeypatch):
 
 
 def test_unreadable_bib_falls_back_without_citeproc(project, monkeypatch):
-    # The package attribute latex_to_md is the function, so patch the module itself.
-    monkeypatch.setattr(sys.modules["latex2md.latex_to_md"], "_drop_failing_entry", lambda *args: False)
+    monkeypatch.setattr("latex2md.bibliography.BibCopies._drop_failing_entry", lambda *args: False)
     result = convert_latex_file_to_md(project / "main.tex")
     assert "As shown by [@knuth1984]" in result.text
     assert "pandoc could not read the bibliography; citations stay as [@key]" in [w.message for w in result.warnings]
