@@ -1,17 +1,77 @@
 name: release
 
-# Push a tag like v0.2.0 to publish to PyPI as `lattuce-latex2md`.
-# Uses PyPI trusted publishing: no API token is stored in GitHub. One-time setup
-# on pypi.org: add a (pending) trusted publisher for project "lattuce-latex2md",
-# owner "lattuce-ai", repository "latex2md", workflow "release.yml",
-# environment "pypi".
+# Releases happen when a version bump reaches main.
+#
+# On every push to main this workflow reads `version` from pyproject.toml. If
+# the tag v<version> does not exist yet, it tests, builds and publishes
+# `lattuce-latex2md` to PyPI, then creates the v<version> tag and a GitHub
+# release. Ordinary merges (version unchanged, tag exists) do nothing.
+#
+# Pushing a v* tag by hand still works as a fallback (the tag must match the
+# version); publishing uses skip-existing, so a version is never uploaded twice.
+#
+# The tag is created with GITHUB_TOKEN, and tags pushed with GITHUB_TOKEN do not
+# start workflows, so the release cannot trigger itself again.
+#
+# PyPI trusted publishing (no API token stored in GitHub). One-time setup on
+# pypi.org: trusted publisher for project "lattuce-latex2md", owner
+# "lattuce-ai", repository "latex2md", workflow "release.yml", environment
+# "pypi". Keep this file's name and the environment name, or update PyPI.
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      release: ${{ steps.plan.outputs.release }}
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: plan
+        name: Decide whether this push is a release
+        run: |
+          version="$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")"
+          module_version="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/latex2md/__init__.py)"
+          if [ "${version}" != "${module_version}" ]; then
+            echo "::error::pyproject.toml says ${version} but src/latex2md/__init__.py says ${module_version}"
+            exit 1
+          fi
+          tag="v${version}"
+          release=false
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            if [ "${GITHUB_REF_NAME}" != "${tag}" ]; then
+              echo "::error::tag ${GITHUB_REF_NAME} does not match package version ${version}"
+              exit 1
+            fi
+            release=true
+          elif git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null; then
+            echo "${tag} already exists; nothing to release."
+          else
+            echo "${tag} does not exist yet; releasing ${version}."
+            release=true
+          fi
+          {
+            echo "release=${release}"
+            echo "version=${version}"
+            echo "tag=${tag}"
+          } >> "${GITHUB_OUTPUT}"
+
   build:
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -21,12 +81,8 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y pandoc
       - run: pip install -e '.[dev]'
       - run: pytest -q
-      - name: Check the tag matches the package version
-        run: |
-          version="$(python -c 'import latex2md; print(latex2md.__version__)')"
-          test "v${version}" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} != v${version}"; exit 1; }
       - run: python -m build
-      - name: Check the wheel ships the Lua filter
+      - name: Check the wheel ships the Lua filters
         run: python -m zipfile -l dist/*.whl | grep -q 'latex2md/latex_to_md.lua'
       - uses: actions/upload-artifact@v4
         with:
@@ -34,7 +90,8 @@ jobs:
           path: dist/
 
   publish:
-    needs: build
+    needs: [plan, build]
+    if: needs.plan.outputs.release == 'true'
     runs-on: ubuntu-24.04
     environment: pypi
     permissions:
@@ -45,3 +102,37 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+
+  tag:
+    # Runs only after a successful publish, so a tag always means "on PyPI".
+    needs: [plan, publish]
+    if: needs.plan.outputs.release == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Create the tag
+        if: github.ref_type != 'tag'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG}" "${GITHUB_SHA}" -m "lattuce-latex2md ${VERSION}"
+          git push origin "refs/tags/${TAG}"
+      - name: Create the GitHub release
+        run: |
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "GitHub release ${TAG} already exists."
+          else
+            gh release create "${TAG}" dist/* --title "lattuce-latex2md ${VERSION}" --generate-notes --verify-tag
+          fi

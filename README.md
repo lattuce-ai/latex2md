@@ -345,7 +345,17 @@ no `<div` and no `:::`.
 
 ## Releasing
 
-Bump `version` in `pyproject.toml` and `__version__` in `src/latex2md/__init__.py`,
-then push a matching tag (`v0.3.0`). The `release` workflow tests, builds and
-publishes to PyPI with trusted publishing (setup steps are in
-`.github/workflows/release.yml`).
+Releases are automatic. To publish a new version:
+
+1. Bump `version` in `pyproject.toml` and `__version__` in `src/latex2md/__init__.py`
+   (the workflow fails if they differ).
+2. Merge that change into `main`.
+
+On every push to `main`, the `release` workflow checks whether the tag `v<version>`
+exists. If it does not, it runs the tests, builds, publishes to PyPI with trusted
+publishing, and only then creates the `v<version>` tag and a GitHub release with the
+built files. Merges that do not change the version publish nothing.
+
+Pushing a matching `v*` tag by hand still works as a fallback; an already-published
+version is skipped rather than uploaded twice. The one-time PyPI setup is described at
+the top of `.github/workflows/release.yml`.
