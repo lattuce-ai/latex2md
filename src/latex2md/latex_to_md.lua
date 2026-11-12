@@ -97,10 +97,15 @@ function Para(para)
   return blocks
 end
 
--- Cross-references: the anchors do not exist in Markdown, so keep the text.
--- Unresolved ones ("[eq:loss]") become "(eq:loss)".
+-- Cross-references are resolved to text before pandoc runs (structure.py).
+-- pandoc's own reference links point at anchors Markdown does not have, so
+-- keep their text; unresolved ones ("[eq:loss]") become "(eq:loss)".
+-- Explicit \\href{#label}{...} links (anchors=True) are resolved in Pandoc().
 function Link(link)
   if link.target:sub(1, 1) ~= "#" then
+    return nil
+  end
+  if not link.attributes["reference-type"] then
     return nil
   end
   local text = stringify(link.content)
@@ -111,17 +116,46 @@ function Link(link)
   return link.content
 end
 
+-- Spans (from \\label in running text, \\textsc-less styling, ...) would be
+-- written as raw HTML; keep only their content.
+function Span(span)
+  return span.content
+end
+
 -- Divs (table/figure wrappers, environments) are unwrapped.
 function Div(div)
   return div.content
 end
 
--- Figures: a single image whose alt text is the caption.
-local function first_image(blocks)
-  local found
+-- Numbered captions arrive as "Figure 2: ..." / "Table 1: ..." (prefixed in
+-- structure.py, which knows LaTeX's numbering); split off that label.
+local function split_label(inlines, word)
+  if #inlines >= 3 and inlines[1].t == "Str" and inlines[1].text == word and inlines[2].t == "Space"
+      and inlines[3].t == "Str" and inlines[3].text:match("^[%w.]+:$") then
+    local rest = pandoc.List()
+    for i = 5, #inlines do
+      rest:insert(inlines[i])
+    end
+    return pandoc.List({ inlines[1], inlines[2], inlines[3] }), rest
+  end
+  return nil, inlines
+end
+
+local function caption_para(caption, word)
+  local label, rest = split_label(caption, word)
+  if not label then
+    return pandoc.Para(caption)
+  end
+  return pandoc.Para(pandoc.List({ pandoc.Strong(label), pandoc.Space() }) .. rest)
+end
+
+-- Figures: a single image whose alt text is the caption. Figures with several
+-- images (subfigures) keep each image, then the caption as a paragraph.
+local function images_in(blocks)
+  local found = {}
   pandoc.walk_block(pandoc.Div(blocks), {
     Image = function(image)
-      found = found or image
+      table.insert(found, image)
     end,
   })
   return found
@@ -129,15 +163,19 @@ end
 
 if pandoc.Figure then
   function Figure(figure)
-    local image = first_image(figure.content)
-    if not image then
-      return figure.content
-    end
+    local images = images_in(figure.content)
     local caption = pandoc.utils.blocks_to_inlines(figure.caption.long or {})
-    if #caption > 0 then
-      image.caption = caption
+    if #images == 1 then
+      if #caption > 0 then
+        images[1].caption = caption
+      end
+      return pandoc.Para({ images[1] })
     end
-    return pandoc.Para({ image })
+    local blocks = pandoc.List(figure.content)
+    if #caption > 0 then
+      blocks:insert(caption_para(caption, "Figure"))
+    end
+    return blocks
   end
 end
 
@@ -148,8 +186,53 @@ function Table(tbl)
     return nil
   end
   tbl.caption.long = {}
-  local label = pandoc.List({ pandoc.Strong({ pandoc.Str("Table:") }), pandoc.Space() })
-  return { pandoc.Para(label .. caption), tbl }
+  local label = split_label(caption, "Table")
+  if label then
+    return { caption_para(caption, "Table"), tbl }
+  end
+  local prefix = pandoc.List({ pandoc.Strong({ pandoc.Str("Table:") }), pandoc.Space() })
+  return { pandoc.Para(prefix .. caption), tbl }
+end
+
+-- GitHub-style heading ids, which GitHub, GitLab and most Markdown renderers
+-- generate on their own: lower case, punctuation dropped, spaces to "-",
+-- "-1", "-2"... for repeats. Plain Markdown has no other anchor syntax.
+local function heading_slugs(blocks)
+  local slugs, seen = {}, {}
+  for _, block in ipairs(blocks) do
+    if block.t == "Header" then
+      local slug = pandoc.text.lower(stringify(block.content))
+      slug = slug:gsub("[%p]", function(c)
+        return (c == "-" or c == "_") and c or ""
+      end):gsub(" ", "-")
+      local count = seen[slug]
+      seen[slug] = (count or 0) + 1
+      if count then
+        slug = slug .. "-" .. count
+      end
+      if block.identifier ~= "" then
+        slugs[block.identifier] = slug
+      end
+    end
+  end
+  return slugs
+end
+
+local function resolve_anchors(doc, enabled)
+  local slugs = enabled and heading_slugs(doc.blocks) or {}
+  return doc:walk({
+    Link = function(link)
+      if link.target:sub(1, 1) ~= "#" then
+        return nil
+      end
+      local slug = slugs[link.target:sub(2)]
+      if slug then
+        link.target = "#" .. slug
+        return link
+      end
+      return link.content
+    end,
+  })
 end
 
 -- Title/author/abstract live in metadata. With front matter disabled, move
@@ -163,6 +246,8 @@ function Pandoc(doc)
     body:extend(doc.blocks)
     doc.blocks = body
   end
+  local anchors = doc.meta.latex2md_anchors and true or false
   doc.meta.latex2md_body_abstract = nil
-  return doc
+  doc.meta.latex2md_anchors = nil
+  return resolve_anchors(doc, anchors)
 end

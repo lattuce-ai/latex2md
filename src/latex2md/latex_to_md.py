@@ -9,6 +9,7 @@ from latex2md.archive import ArchiveLimits, extract_archive
 from latex2md.flatten import flatten_source, read_tex, sibling_bbl
 from latex2md.pandoc import MARKDOWN_OUT, pandoc_messages, run_pandoc_output
 from latex2md.result import ConversionResult, WarningLog
+from latex2md.structure import resolve_structure
 
 # Leftover pandoc attribute blocks such as {#sec:intro} or {.unnumbered}.
 _ATTR_RE = re.compile(r"[ \t]*\{(?:[#.][\w:.-]+[ \t]*|[\w-]+=\"[^\"]*\"[ \t]*)+\}")
@@ -85,6 +86,7 @@ def convert_latex_to_md(
     base_dir: str | Path | None = None,
     front_matter: bool = True,
     bbl: str | None = None,
+    anchors: bool = False,
 ) -> ConversionResult:
     """Convert LaTeX to Markdown and report what could not be carried over.
 
@@ -101,9 +103,12 @@ def convert_latex_to_md(
                 "missing_bibliography",
                 f"{match.group(0)}: no .bbl given, so citations stay as [@key]",
             )
-    source = _bibliography_as_list(source)
+    source, structure_warnings = resolve_structure(_bibliography_as_list(source), anchors=anchors)
+    warnings.extend_unique(structure_warnings)
     args = ["--wrap=none", "--verbose"]
     args.append("--standalone" if front_matter else "--metadata=latex2md_body_abstract:true")
+    if anchors:
+        args.append("--metadata=latex2md_anchors:true")
     with resources.as_file(resources.files("latex2md") / _LUA_FILTER) as lua_filter:
         output = run_pandoc_output(
             source,
@@ -121,6 +126,7 @@ def latex_to_md(
     base_dir: str | Path | None = None,
     front_matter: bool = True,
     bbl: str | None = None,
+    anchors: bool = False,
 ) -> str:
     """Convert LaTeX (a full document or a fragment) to Markdown.
 
@@ -135,9 +141,14 @@ def latex_to_md(
     ``False`` drops title/author and puts the abstract under an "Abstract"
     heading. ``bbl`` (compiled bibliography) replaces ``\\bibliography{...}``.
 
+    Display equations, sections, figures, tables, theorems and algorithms are
+    numbered as LaTeX would number them; ``\\ref``/``\\eqref``/``\\cref`` become
+    those numbers. ``anchors=True`` turns references to sections into links
+    to the heading's GitHub-style id, e.g. ``[3](#method)``.
+
     Use :func:`convert_latex_to_md` to also get the conversion warnings.
     """
-    return convert_latex_to_md(latex, base_dir=base_dir, front_matter=front_matter, bbl=bbl).text
+    return convert_latex_to_md(latex, base_dir=base_dir, front_matter=front_matter, bbl=bbl, anchors=anchors).text
 
 
 def convert_latex_file_to_md(
@@ -145,6 +156,7 @@ def convert_latex_file_to_md(
     *,
     base_dir: str | Path | None = None,
     front_matter: bool = True,
+    anchors: bool = False,
 ) -> ConversionResult:
     """:func:`latex_file_to_md`, returning a :class:`~latex2md.result.ConversionResult`."""
     path = Path(path)
@@ -153,6 +165,7 @@ def convert_latex_file_to_md(
         base_dir=base_dir or path.parent,
         front_matter=front_matter,
         bbl=sibling_bbl(path),
+        anchors=anchors,
     )
 
 
@@ -161,13 +174,14 @@ def latex_file_to_md(
     *,
     base_dir: str | Path | None = None,
     front_matter: bool = True,
+    anchors: bool = False,
 ) -> str:
     """Convert a ``.tex`` file.
 
     Includes resolve under its folder (or ``base_dir``), and a sibling ``.bbl``
     with the same name, as shipped in arXiv sources, fills in the bibliography.
     """
-    return convert_latex_file_to_md(path, base_dir=base_dir, front_matter=front_matter).text
+    return convert_latex_file_to_md(path, base_dir=base_dir, front_matter=front_matter, anchors=anchors).text
 
 
 def convert_latex_archive_to_md(
@@ -175,13 +189,16 @@ def convert_latex_archive_to_md(
     *,
     front_matter: bool = True,
     limits: ArchiveLimits | None = None,
+    anchors: bool = False,
 ) -> ConversionResult:
     """:func:`latex_archive_to_md`, returning a :class:`~latex2md.result.ConversionResult`.
 
     Archive members that were not extracted are reported as ``skipped_member``.
     """
     with extract_archive(data, limits=limits) as archive:
-        result = convert_latex_file_to_md(archive.main_tex, base_dir=archive.root, front_matter=front_matter)
+        result = convert_latex_file_to_md(
+            archive.main_tex, base_dir=archive.root, front_matter=front_matter, anchors=anchors
+        )
     warnings = WarningLog(result.warnings)
     for message in archive.skipped:
         warnings.add("skipped_member", message)
@@ -193,6 +210,7 @@ def latex_archive_to_md(
     *,
     front_matter: bool = True,
     limits: ArchiveLimits | None = None,
+    anchors: bool = False,
 ) -> str:
     """Convert an arXiv-style source archive (zip, tar, tar.gz, gzip'd or bare ``.tex``).
 
@@ -200,4 +218,4 @@ def latex_archive_to_md(
     (see :class:`~latex2md.archive.ArchiveLimits`), the main file is picked as
     LaTeX would be run on it, and it is converted like :func:`latex_file_to_md`.
     """
-    return convert_latex_archive_to_md(data, front_matter=front_matter, limits=limits).text
+    return convert_latex_archive_to_md(data, front_matter=front_matter, limits=limits, anchors=anchors).text

@@ -113,7 +113,7 @@ HARMLESS_COMMANDS = frozenset({
     "frenchspacing", "normalsize", "small", "footnotesize", "scriptsize", "tiny", "large",
     "Large", "LARGE", "huge", "Huge", "selectfont", "onecolumn", "twocolumn", "flushbottom",
     "raggedbottom", "newline", "relax", "nocite", "looseness", "DeclareGraphicsExtensions",
-    "allowdisplaybreaks", "label", "ignorespaces", "leavevmode", "null",
+    "allowdisplaybreaks", "appendix", "label", "ignorespaces", "leavevmode", "null",
 })
 
 

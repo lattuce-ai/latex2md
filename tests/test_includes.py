@@ -115,7 +115,9 @@ class TestArxivStylePaper:
 
     def test_display_math_is_its_own_block_without_labels(self, paper_md):
         assert "The loss combines two terms:\n\n$$\\begin{aligned}" in paper_md
-        assert "\\end{aligned}$$\n\nEquation (eq:loss)" in paper_md
+        # 0.3.0: align rows are numbered (1) and (2); the block carries one tag outside
+        # aligned (KaTeX cannot tag rows of aligned) and \eqref resolves to the number.
+        assert "\\end{aligned} \\tag{1–2}$$\n\nEquation (1) is minimised" in paper_md
         assert "\\label" not in paper_md
 
     def test_references_are_text_not_dead_links(self, paper_md):
@@ -124,9 +126,9 @@ class TestArxivStylePaper:
         assert "](#" not in paper_md
 
     def test_table_figure_and_listing(self, paper_md):
-        assert "**Table:** Accuracy on the benchmark.\n\n| Model    | Accuracy | Params |" in paper_md
+        assert "**Table 1:** Accuracy on the benchmark.\n\n| Model    | Accuracy | Params |" in paper_md
         assert "| SparseRx | **83.4** |  95M   |" in paper_md
-        assert "![Attention pattern of SparseRx.](figures/attention.png)" in paper_md
+        assert "![Figure 1: Attention pattern of SparseRx.](figures/attention.png)" in paper_md
         assert "```text\ndef score(q, k):\n    return (q @ k.T) / 8  # 100% vectorised\n```" in paper_md
 
     def test_no_html_or_pandoc_only_syntax(self, paper_md):

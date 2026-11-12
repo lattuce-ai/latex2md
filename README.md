@@ -157,8 +157,12 @@ commands in the preamble are not reported.
 | Multi-file projects | — | `\input`, `\include`, `\subfile`, `\import`, `\lstinputlisting` inlined from the project folder |
 | Title, authors, abstract | — | YAML front matter, or an "Abstract" section with `front_matter=False` |
 | Macros (`\newcommand`) | — | expanded |
-| Floats | — | `figure` → image with caption as alt text; `table` → "**Table:** caption" + pipe table |
-| Cross-references | — | `\ref` → its number as text (no dead `#anchor` links); `\eqref` → `(label)` |
+| Floats | — | `figure` → image with "Figure 2: caption" as alt text; subfigures → one image each with "(a) caption", then "**Figure 2:** caption"; `table` → "**Table 1:** caption" + pipe table |
+| Equation numbers | — | numbered as in LaTeX, written as `\tag{n}` (see below) |
+| Cross-references | — | `\ref`, `\eqref`, `\autoref`, `\cref`, `\Cref`, `\subref` → the number LaTeX would print |
+| Theorems (amsthm) | — | `**Theorem 1 (Name).** body`, numbered per `\newtheorem`; `proof` → `*Proof.* … ∎` |
+| Algorithms | — | "**Algorithm 1:** caption" + a fenced `text` block of indented pseudo-code |
+| Unknown environments | — | content kept, `unknown_environment` warning |
 | Bibliography | — | `thebibliography` → "References" list; a sibling `.bbl` fills `\bibliography{}` |
 
 Fragment output (the default) avoids macros that only pandoc's template defines
@@ -174,11 +178,42 @@ more than 20 MB of included files are skipped. Without a base folder, include
 commands are removed. Archives are unpacked under the limits above. This makes
 it safe to run on untrusted uploads.
 
+## Numbering and cross-references
+
+LaTeX → Markdown numbers things the way LaTeX does, in document order, and
+replaces references with those numbers:
+
+- **Equations:** `equation`, `align`, `gather`, `multline`, `alignat`, `flalign`
+  and `eqnarray` are numbered; starred environments and rows with
+  `\nonumber`/`\notag` are not; `\tag{x}` is respected; `\numberwithin` and
+  book/report chapters give "2.3". The number is written as `\tag{n}` at the
+  end of the `$$…$$` block, which KaTeX and MathJax render. `align` becomes
+  `aligned`, and since KaTeX cannot tag rows of `aligned`, a block with several
+  numbered rows carries **one tag with the range**, e.g. `\tag{1–2}`; each row's
+  `\label` still resolves to its own number. `\label` never stays in math.
+- **Sections** (including `\appendix` → A, B), **figures**, **subfigures** (1a),
+  **tables**, **theorems**, **algorithms**, algorithm lines and `enumerate` items
+  get numbers too.
+- `\ref{x}` → `3`; `\ref`/`\eqref` to an equation → `(4)`; `\autoref`, `\cref`,
+  `\Cref` → "Section 3", "Figure 2", "Table 1", "Equation (4)", "Theorem 2.1",
+  "Algorithm 1"; `\cref{a,b}` → "Sections 1 and 2"; `\subref` → "(a)".
+- A label that does not exist becomes `(label)` and an `unresolved_reference` warning.
+
+`anchors=True` (`latex_to_md`, `latex_file_to_md`, `latex_archive_to_md`)
+links references to **sections** to their heading: `Section [3](#method)`.
+The link target is the heading's GitHub-style id (lower case, punctuation
+removed, spaces → `-`, `-1`, `-2`… for repeated titles), which GitHub, GitLab,
+VS Code and most Markdown renderers generate on their own; nothing is added to
+the heading, so the output stays plain Markdown with no HTML or `{#id}`
+attributes. Plain Markdown has no anchor syntax for equations, figures or
+tables, so references to those stay text.
+
 ## Limitations
 
 - Custom macros and unusual packages in LaTeX are only as good as pandoc's LaTeX reader;
   unknown commands are dropped.
-- Equations are not numbered in Markdown, so `\eqref` shows the label, e.g. `(eq:loss)`.
+- Pseudo-code in algorithms is not macro-expanded, and `subequations` are numbered
+  as ordinary equations.
 - Bibliographies from `.bib` files need the compiled `.bbl`; citations stay as `[@key]`.
 - Figures with `\includegraphics` keep the path; image files are not copied.
 
