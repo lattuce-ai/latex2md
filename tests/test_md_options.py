@@ -76,24 +76,38 @@ def test_custom_template_with_variables(template):
     assert out == "% custom\n\\documentclass{letter}\n\\begin{document}\nTo: Ada\nHello \\textbf{world}.\n\\end{document}\n"
 
 
-def test_template_must_be_inside_resource_dir_and_exist(template, tmp_path):
-    md_to_latex("x", template=template, resource_dir=template.parent)
+def test_caller_files_need_not_be_inside_resource_dir_but_must_exist(template, tmp_path):
+    # template / bibliography / csl are the caller's own files; only images a
+    # document names are confined to resource_dir.
     other = tmp_path / "other"
     other.mkdir()
-    with pytest.raises(ConversionError, match="outside"):
-        md_to_latex("x", template=template, resource_dir=other)
+    md_to_latex("x", template=template, resource_dir=other)
+    out = md_to_latex(CITES, citations="citeproc", bibliography=BIB / "refs.bib", csl=BIB / "numeric.csl", resource_dir=other)
+    assert "References" in out
     with pytest.raises(ConversionError, match="not an existing file"):
         md_to_latex("x", template=template.parent / "nope.latex")
-    (template.parent / "link.latex").symlink_to("/etc/hostname")
-    with pytest.raises(ConversionError, match="outside"):
-        md_to_latex("x", template=template.parent / "link.latex", resource_dir=template.parent)
 
 
-def test_bibliography_and_csl_must_be_inside_resource_dir(tmp_path):
-    with pytest.raises(ConversionError, match="outside"):
-        md_to_latex(CITES, citations="citeproc", bibliography=BIB / "refs.bib", resource_dir=tmp_path)
-    with pytest.raises(ConversionError, match="outside"):
-        md_to_latex(CITES, citations="citeproc", csl=BIB / "numeric.csl", resource_dir=tmp_path)
+def test_images_stay_confined_to_resource_dir_with_a_custom_template(template, tmp_path):
+    outside = tmp_path / "secret.png"
+    outside.write_bytes(b"x")
+    resources = tmp_path / "images"
+    resources.mkdir()
+    out = md_to_latex(f"![x]({outside})", template=template, resource_dir=resources)
+    assert str(outside) not in out
+
+
+def test_custom_template_without_pandoc_helpers_gets_plain_references(tmp_path):
+    bare = tmp_path / "bare.latex"
+    bare.write_text("\\documentclass{article}\n\\begin{document}\n$body$\n\\end{document}\n", encoding="utf-8")
+    out = md_to_latex(CITES + "\n\n- a\n- b\n", template=bare, citations="citeproc", bibliography=BIB / "refs.bib")
+    assert "CSLReferences" not in out and "\\section*{References}" in out
+    assert "\\tightlist" not in out
+
+
+def test_default_template_keeps_its_own_reference_environment():
+    out = md_to_latex(CITES, standalone=True, citations="citeproc", bibliography=BIB / "refs.bib")
+    assert "CSLReferences" in out
 
 
 def test_invalid_variable_name(template):

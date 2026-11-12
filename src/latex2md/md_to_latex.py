@@ -131,11 +131,20 @@ def convert_md_to_latex(
     root = Path(resource_dir).resolve() if resource_dir is not None else None
     if root is not None and not root.is_dir():
         raise ConversionError(f"resource_dir {str(resource_dir)!r} is not a folder")
-    template_path = checked_file(template, root, what="template", max_bytes=_MAX_TEMPLATE_BYTES) if template else None
+    # template, bibliography and csl are the caller's own files, not paths a
+    # document names, so they are checked (regular file, size cap) but not
+    # confined to resource_dir; only document images are.
+    template_path = checked_file(template, None, what="template", max_bytes=_MAX_TEMPLATE_BYTES) if template else None
     checked_bib = (
-        checked_file(bibliography, root, what="bibliography", max_bytes=MAX_BIB_BYTES) if bibliography else None
+        checked_file(bibliography, None, what="bibliography", max_bytes=MAX_BIB_BYTES) if bibliography else None
     )
-    style = checked_file(csl, root, what="CSL style") if csl else None
+    style = checked_file(csl, None, what="CSL style") if csl else None
+    # Macros pandoc's own template defines; a custom template may not.
+    template_text = template_path.read_text(encoding="utf-8", errors="replace") if template_path else None
+
+    def template_lacks(macro: str) -> bool:
+        return not standalone or (template_text is not None and macro not in template_text)
+
     standalone = standalone or template_path is not None
     reader_args, writer_args = _citation_args(citations, bibliography, style)
 
@@ -157,7 +166,7 @@ def convert_md_to_latex(
     warnings.extend_unique(pandoc_messages(parsed.stderr))
     ast = json.loads(parsed.stdout)
     warnings.extend_unique(filter_images(ast, resource_dir=root, allow_remote=allow_remote_images))
-    if not standalone:
+    if template_lacks("CSLReferences"):
         references_as_list(ast)
 
     args = ["--wrap=none", "--no-highlight", "--verbose", *writer_args]
@@ -181,12 +190,14 @@ def convert_md_to_latex(
             latex = _inject_package(latex, _MHCHEM_PACKAGE)
         if declarations := _unicode_declarations(latex):
             latex = _inject_package(latex, declarations)
-    else:
-        # Fragments must not depend on macros defined only in pandoc's template.
+    # Fragments, and custom templates that do not define them, must not depend
+    # on macros only pandoc's default template provides.
+    if template_lacks("tightlist"):
         latex = _TIGHTLIST_RE.sub("", latex)
+    if template_lacks("pandocbounded"):
         latex = _unwrap_pandocbounded(latex)
-        if citations == "cite":
-            latex = _CITEP_RE.sub(r"\\cite", latex)
+    if not standalone and citations == "cite":
+        latex = _CITEP_RE.sub(r"\\cite", latex)
     latex = _BLANK_RUN_RE.sub("\n\n", latex)
     return ConversionResult(latex.strip() + "\n", list(warnings))
 
