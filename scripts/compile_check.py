@@ -7,7 +7,7 @@ trips to standalone documents, plus the Markdown fixture as a fragment in an
 ordinary preamble (latex2md promises fragments need no pandoc-only macros),
 and runs ``latexmk -pdf -interaction=nonstopmode`` on each. Any failure
 makes the script exit 1. CI runs it in the ``compile`` job; it needs TeX Live
-(texlive-latex-recommended, texlive-latex-extra, texlive-science, latexmk).
+(texlive-latex-recommended, texlive-latex-extra, texlive-science, lmodern, latexmk).
 
     python scripts/compile_check.py [--keep DIR]
 """

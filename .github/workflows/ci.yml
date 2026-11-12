@@ -41,7 +41,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends pandoc latexmk \
-            texlive-latex-recommended texlive-latex-extra texlive-science
+            texlive-latex-recommended texlive-latex-extra texlive-science lmodern
       - run: pip install -e .
       - run: python scripts/compile_check.py --keep compile-output
       - uses: actions/upload-artifact@v4

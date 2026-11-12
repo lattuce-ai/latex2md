@@ -172,7 +172,8 @@ commands in the preamble are not reported.
 | Bibliography | — | `thebibliography` → "References" list; a sibling `.bbl` fills `\bibliography{}`; otherwise a `.bib` in the project is rendered by citeproc (see below) |
 
 Fragment output (the default) avoids macros that only pandoc's template defines
-(`\tightlist`, `Shaded`, `\hypertarget`), so it compiles in an ordinary preamble.
+(`\tightlist`, `Shaded`, `\hypertarget`), so it compiles in an ordinary preamble. Standalone output uses pandoc's
+template, which loads `lmodern` (Debian/Ubuntu: the `lmodern` package).
 
 ## Safety
 
@@ -321,7 +322,8 @@ pandoc 3.6.4, plus two more jobs:
   and LaTeX → Markdown → LaTeX round trips to standalone documents (and the
   Markdown fixture as a fragment in a plain preamble) and compiles each with
   `latexmk -pdf -interaction=nonstopmode`. It needs TeX Live
-  (`texlive-latex-recommended texlive-latex-extra texlive-science latexmk`).
+  (`texlive-latex-recommended texlive-latex-extra texlive-science lmodern latexmk`;
+  pandoc's standalone template loads `lmodern`, which minimal installs leave out).
 - **corpus**: ten real arXiv papers (cs, math, astro-ph, q-bio, quant-ph),
   listed in `tests/corpus/manifest.json` with their licence, the sha256 of the
   e-print and structural expectations (heading range, minimum display
