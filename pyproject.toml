@@ -3,15 +3,26 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "latex2md"
-version = "0.1.0"
+name = "lattuce-latex2md"
+version = "0.2.0"
 description = "Markdown <-> LaTeX conversion built on pandoc, with math, mhchem and citation clean-up."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
+keywords = ["markdown", "latex", "pandoc", "converter", "arxiv"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Text Processing :: Markup :: LaTeX",
+    "Topic :: Text Processing :: Markup :: Markdown",
+]
+
+[project.urls]
+Source = "https://github.com/lattuce-ai/latex2md"
+Issues = "https://github.com/lattuce-ai/latex2md/issues"
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "build>=1.2"]
 
 [project.scripts]
 latex2md = "latex2md.cli:main"

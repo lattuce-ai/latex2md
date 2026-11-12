@@ -10,11 +10,20 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.11", "3.13"]
+        pandoc: ["apt", "3.6.4"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: sudo apt-get update && sudo apt-get install -y pandoc
+      - name: Install pandoc (Ubuntu package)
+        if: matrix.pandoc == 'apt'
+        run: sudo apt-get update && sudo apt-get install -y pandoc
+      - name: Install pandoc ${{ matrix.pandoc }} (upstream release)
+        if: matrix.pandoc != 'apt'
+        run: |
+          curl -fsSL -o pandoc.deb "https://github.com/jgm/pandoc/releases/download/${{ matrix.pandoc }}/pandoc-${{ matrix.pandoc }}-1-amd64.deb"
+          sudo dpkg -i pandoc.deb
+      - run: pandoc --version | head -1
       - run: pip install -e '.[dev]'
       - run: pytest -q
