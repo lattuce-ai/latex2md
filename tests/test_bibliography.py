@@ -150,3 +150,75 @@ def test_sanitize_bib():
 def test_drop_entry_at_line():
     text = "@misc{a, title={1}}\n\n@misc{b,\n title={2}}\n\n@misc{c, title={3}}\n"
     assert drop_entry_at_line(text, 4) == ("@misc{a, title={1}}\n\n@misc{c, title={3}}\n", "@misc{b,")
+
+
+BIBLATEX_BBL = r"""% $ biblatex auxiliary file $
+\begingroup
+\makeatletter
+\@ifundefined{ver@biblatex.sty}
+  {\@latex@error
+     {Missing 'biblatex' package}
+     {The bibliography requires the 'biblatex' package.}
+      \aftergroup\endinput}
+  {}
+\endgroup
+\refsection{0}
+  \datalist[entry]{nyt/global//global/global}
+    \entry{doe2020}{article}{}
+      \name{author}{2}{}{%
+        {{hash=1}{%
+           family={Doe},
+           familyi={D\bibinitperiod},
+           given={Jane\bibnamedelima Q.},
+           giveni={J\bibinitperiod}}}%
+        {{hash=2}{%
+           family={Roe},
+           given={R.},
+           giveni={R\bibinitperiod}}}%
+      }
+      \list{publisher}{1}{%
+        {ACME}%
+      }
+      \field{title}{A study}
+      \field{journaltitle}{Journal of Tests}
+      \field{volume}{4}
+      \field{year}{2020}
+      \field{pages}{1\bibrangedash 9}
+      \verb{doi}
+      \verb 10.1000/xyz
+      \endverb
+    \endentry
+  \enddatalist
+\endrefsection
+\endinput
+"""
+
+
+def test_biblatex_bbl_becomes_a_reference_list():
+    from latex2md.biblatex_bbl import biblatex_bbl_to_thebibliography
+
+    out = biblatex_bbl_to_thebibliography(BIBLATEX_BBL)
+    assert out == (
+        "\\begin{thebibliography}{99}\n"
+        "\\bibitem{doe2020} Jane Q. Doe, R. Roe. A study. Journal of Tests, ACME, 4, 1-9, 2020."
+        " \\url{https://doi.org/10.1000/xyz}\n\\end{thebibliography}\n"
+    )
+
+
+def test_biblatex_bbl_is_printed_where_printbibliography_is(tmp_path):
+    """Inlining biber's data file used to make pandoc return an empty document."""
+    (tmp_path / "main.tex").write_text(
+        "\\usepackage{biblatex}\\addbibresource{refs.bib}\\begin{document}\nIntro \\cite{doe2020}.\n"
+        "\\printbibliography\n\\section{After}\nText.\n\\end{document}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "main.bbl").write_text(BIBLATEX_BBL, encoding="utf-8")
+    md = latex_file_to_md(tmp_path / "main.tex")
+    assert "Intro [@doe2020].\n\n# References\n\n- Jane Q. Doe, R. Roe. A study." in md
+    assert "<https://doi.org/10.1000/xyz>\n\n# After\n\nText." in md
+
+
+def test_global_long_def_does_not_empty_the_document():
+    """pandoc returns nothing for \\global\\long\\def (LyX preambles)."""
+    md = latex_to_md("\\global\\long\\def\\expt{\\mathbb{E}}\\begin{document}Mean $\\expt[X]$.\\end{document}")
+    assert md == "Mean $\\mathbb{E}[X]$.\n"

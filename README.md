@@ -229,7 +229,9 @@ the TeX run at files it should not read:
 
 ## Bibliographies
 
-A compiled `.bbl` (arXiv ships one next to the main file) is used as is. When
+A compiled `.bbl` (arXiv ships one next to the main file) is used as is; a
+biblatex `.bbl` (biber's data format) is read and printed as a reference list
+where `\printbibliography` stood. When
 there is none, the `.bib` files named by `\bibliography{refs}` or
 `\addbibresource{refs.bib}` are looked up inside the base folder and rendered
 by pandoc's citeproc as a "References" list where `\bibliography`/`\printbibliography`

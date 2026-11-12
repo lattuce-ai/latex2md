@@ -213,6 +213,9 @@ def _unpack(data: bytes, writer: _Writer) -> None:
     if _is_tar(data[:512]):
         _extract_tar(io.BytesIO(data), writer)
         return
+    if data.startswith(b"%PDF"):
+        # arXiv serves the PDF as the "e-print" of submissions without source.
+        raise ArchiveError("this is a PDF, not LaTeX source")
     if b"\x00" in data[:4096]:
         raise ArchiveError("not a zip, tar, gzip or .tex file")
     _write_single_tex(io.BytesIO(data).read, writer)

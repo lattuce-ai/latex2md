@@ -89,6 +89,7 @@ def test_temp_dir_is_private_and_removed():
 def test_binary_garbage_is_rejected():
     _fails(b"\x00\x01\x02garbage")
     _fails(b"\x1f\x8b\x08\x00broken", match="invalid")
+    _fails(b"%PDF-1.6\n...", match="PDF, not LaTeX source")
     assert issubclass(ArchiveError, ConversionError)
 
 

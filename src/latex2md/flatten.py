@@ -11,12 +11,32 @@ import os
 import re
 from pathlib import Path
 
+from latex2md.biblatex_bbl import biblatex_bbl_to_thebibliography, is_biblatex_bbl
 from latex2md.comments import strip_comments
 from latex2md.includes import expand_includes
 from latex2md.mhchem import wrap_text_mode_mhchem
 from latex2md.result import ConversionWarning
 
 BIBLIOGRAPHY_RE = re.compile(r"\\bibliography\s*\{[^{}]*\}")
+_PRINT_BIBLIOGRAPHY_RE = re.compile(r"\\printbibliography\s*(?:\[[^\]]*\])?")
+_BEGIN_DOCUMENT_RE = re.compile(r"\\begin\s*\{document\}")
+
+
+def inline_bbl(source: str, bbl: str) -> str:
+    """Put the compiled bibliography where LaTeX would print it.
+
+    A biblatex ``.bbl`` is biber data, not LaTeX, and is rendered as a
+    ``thebibliography`` list first. It goes at ``\\printbibliography`` when the
+    body has one, else at the first ``\\bibliography{...}``.
+    """
+    text = strip_comments(bbl)
+    if is_biblatex_bbl(text):
+        text = biblatex_bbl_to_thebibliography(text)
+    begin = _BEGIN_DOCUMENT_RE.search(source)
+    printed = _PRINT_BIBLIOGRAPHY_RE.search(source, begin.end() if begin else 0)
+    if printed:
+        return source[: printed.start()] + text + source[printed.end() :]
+    return BIBLIOGRAPHY_RE.sub(lambda _: text, source, count=1)
 
 
 def read_tex(path: Path) -> str:
@@ -38,7 +58,7 @@ def flatten_source(
 ) -> str:
     source = expand_includes(strip_comments(latex), base_dir, warnings=warnings)
     if bbl is not None:
-        source = BIBLIOGRAPHY_RE.sub(lambda _: strip_comments(bbl), source, count=1)
+        source = inline_bbl(source, bbl)
     return wrap_text_mode_mhchem(source)
 
 
@@ -57,7 +77,8 @@ def flatten_latex(
 
     Steps: ``%`` comments are stripped, ``\\input``/``\\include``/``\\subfile``/
     ``\\import`` and listing includes are inlined from inside ``base_dir`` only,
-    the ``.bbl`` replaces ``\\bibliography{...}``, and text-mode ``\\ce{}`` is
+    the ``.bbl`` replaces ``\\bibliography{...}`` (or ``\\printbibliography``; a
+    biblatex ``.bbl`` becomes a ``thebibliography`` list), and text-mode ``\\ce{}`` is
     wrapped in ``$...$`` so it survives as math.
     """
     if isinstance(path_or_text, os.PathLike):

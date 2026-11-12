@@ -148,7 +148,8 @@ def pandoc_messages(stderr: str, *, body_start_line: int = 0) -> list[Conversion
             name = _COMMAND_NAME_RE.match(snippet)
             if name and name.group(1) in HARMLESS_COMMANDS:
                 continue
-            warnings.append(ConversionWarning("unknown_command", snippet, location))
+            shown = snippet if len(snippet) <= 120 else snippet[:117] + "..."
+            warnings.append(ConversionWarning("unknown_command", shown, location))
             continue
         if level in ("WARNING", "ERROR"):
             where = _LINE_RE.search(text)

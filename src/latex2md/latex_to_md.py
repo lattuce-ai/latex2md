@@ -39,6 +39,9 @@ _THEBIBLIOGRAPHY_BEGIN_RE = re.compile(r"\\begin\{thebibliography\}\s*\{[^{}]*\}
 _THEBIBLIOGRAPHY_END_RE = re.compile(r"\\end\{thebibliography\}")
 _BIBITEM_RE = re.compile(r"\\bibitem\s*(?:\[[^\]]*\])?\s*\{[^{}]*\}")
 _BEGIN_DOCUMENT = "\\begin{document}"
+# LyX and older preambles write \global\long\def; pandoc then silently returns
+# an empty document. The prefixes do not matter for conversion.
+_DEF_PREFIX_RE = re.compile(r"(?:\\(?:global|long|outer|protected)(?![A-Za-z])\s*)+(?=\\[gex]?def(?![A-Za-z]))")
 # Where citeproc's reference list goes; the Lua filter swaps it in.
 _REFERENCES_PLACEHOLDER = "\\par LATEX2MDREFERENCES\\par "
 CiteStyle = Literal["keep", "rendered"]
@@ -131,7 +134,7 @@ def convert_latex_to_md(
     if cite_style not in ("keep", "rendered"):
         raise ValueError(f"cite_style must be 'keep' or 'rendered', not {cite_style!r}")
     warnings = WarningLog()
-    source = flatten_source(latex, base_dir=base_dir, bbl=bbl, warnings=warnings)
+    source = _DEF_PREFIX_RE.sub("", flatten_source(latex, base_dir=base_dir, bbl=bbl, warnings=warnings))
     bibs = BibFiles() if bbl is not None else find_bib_files(source, base_dir)
     warnings.extend_unique(bibs.warnings)
     style = checked_file(csl, base_dir, what="CSL style") if csl is not None else None
