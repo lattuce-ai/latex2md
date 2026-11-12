@@ -157,3 +157,50 @@ def test_bbl_fills_bibliography(tmp_path):
     )
     md = latex_file_to_md(root / "paper.tex")
     assert "# References\n\n- Knuth. TeX. 1984." in md
+
+
+def _nested_project(tmp_path: Path) -> Path:
+    return _project(
+        tmp_path,
+        {
+            "thesis/main.tex": "\\documentclass{article}\n\\begin{document}\n\\input{chapters/ch1}\n\\bibliography{refs}\n\\end{document}\n",
+            "thesis/chapters/ch1.tex": "\\section{One}\nBody \\input{shared} \\cite{k}.\n",
+            # LaTeX resolves nested inputs from the main file's folder first.
+            "thesis/shared.tex": "FROM-MAIN-DIR",
+            "thesis/chapters/shared.tex": "FROM-CHAPTER-DIR",
+            "thesis/refs.bib": "@book{k, title={TeX}, author={Knuth, Donald}, year={1984}}\n",
+        },
+    )
+
+
+@requires_pandoc
+def test_main_file_in_a_subfolder_resolves_includes_like_latex(tmp_path):
+    root = _nested_project(tmp_path)
+    md = latex_file_to_md(root / "thesis" / "main.tex", base_dir=root, front_matter=False)
+    assert "# One" in md
+    assert "FROM-MAIN-DIR" in md and "FROM-CHAPTER-DIR" not in md
+    assert "Knuth" in md, "refs.bib next to the main file must be found"
+
+
+@requires_pandoc
+def test_zipped_project_with_top_level_folder(tmp_path):
+    import io
+    import zipfile
+
+    root = _nested_project(tmp_path)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for path in sorted(root.rglob("*")):
+            if path.is_file():
+                archive.write(path, path.relative_to(root).as_posix())
+    from latex2md import convert_latex_archive_to_md
+
+    result = convert_latex_archive_to_md(buffer.getvalue(), front_matter=False)
+    assert "# One" in result.text and "FROM-MAIN-DIR" in result.text
+    assert not [w for w in result.warnings if w.kind == "skipped_include"]
+
+
+def test_start_dir_outside_base_dir_is_ignored(tmp_path):
+    root = _project(tmp_path, {"inside/a.tex": "A"})
+    outside = tmp_path.parent
+    assert "A" in expand_includes("\\input{inside/a}", root, start_dir=outside)

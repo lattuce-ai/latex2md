@@ -102,9 +102,13 @@ class BibFiles:
     commands: bool = False  # the document asks for a bibliography at all
 
 
-def find_bib_files(source: str, base_dir: str | Path | None) -> BibFiles:
+def find_bib_files(source: str, base_dir: str | Path | None, *, start_dir: str | Path | None = None) -> BibFiles:
+    """BibTeX looks next to the main file (``start_dir``); fall back to the root."""
     found = BibFiles()
     root = Path(base_dir).resolve() if base_dir is not None else None
+    start = Path(start_dir).resolve() if start_dir is not None and root is not None else root
+    if start is not None and root is not None and not start.is_relative_to(root):
+        start = root
     for match in BIB_COMMAND_RE.finditer(source):
         found.commands = True
         for name in (part.strip() for part in match.group(2).split(",")):
@@ -116,8 +120,9 @@ def find_bib_files(source: str, base_dir: str | Path | None) -> BibFiles:
             elif Path(name).is_absolute() or name.startswith("~"):
                 reason = "absolute path"
             else:
-                path = root / (name if name.lower().endswith(".bib") else f"{name}.bib")
-                resolved = path.resolve()
+                file_name = name if name.lower().endswith(".bib") else f"{name}.bib"
+                candidates = [(folder / file_name).resolve() for folder in dict.fromkeys((start, root))]
+                resolved = next((c for c in candidates if c.is_relative_to(root) and c.is_file()), candidates[0])
                 if not resolved.is_relative_to(root):
                     reason = "outside base dir"
                 elif not resolved.is_file():

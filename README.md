@@ -195,7 +195,7 @@ tex = md_to_latex(
     citations="citeproc",                      # "cite" (default), "natbib", "biblatex", "citeproc"
     bibliography="paper/refs.bib",             # .bib or CSL JSON
     csl="paper/ieee.csl",                      # citeproc style
-    resource_dir="paper/",                     # images, template, bibliography and CSL must be inside
+    resource_dir="paper/",                     # document images must be inside
     allow_remote_images=False,                 # default
 )
 ```
@@ -227,8 +227,15 @@ the TeX run at files it should not read:
   replaced by its alt text (a figure keeps its caption) and reported as a
   `dropped_image` warning.
 
-`template`, `bibliography` and `csl` must be existing regular files, inside
-`resource_dir` when one is given; otherwise `ConversionError` is raised.
+`template`, `bibliography` and `csl` are your own files, not paths a document
+names, so they need not be inside `resource_dir`; they must be existing regular
+files within the size caps, otherwise `ConversionError` is raised.
+
+With a custom `template` that does not define pandoc's template-only helpers
+(`CSLReferences`, `\tightlist`, `\pandocbounded`), latex2md writes what a
+fragment would instead: references as a plain "References" list, no
+`\tightlist`, plain `\includegraphics`. The output then compiles with that
+template.
 
 ## Bibliographies
 
