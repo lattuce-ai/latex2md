@@ -27,6 +27,18 @@ _NOT_RENDERED_RE = re.compile(r'^\[INFO\] Not rendering Image .*\("((?:[^"\\]|\\
 
 MHCHEM_RE = re.compile(r"\\c[ef]\{")
 _MHCHEM_PACKAGE = "\\usepackage[version=4]{mhchem}"
+# Characters latex2md and pandoc put into LaTeX that pdfLaTeX has no glyph
+# mapping for (pandoc reads "\\," as U+2006; proofs end with ∎; pseudo-code
+# comments use ▷). Declared only when used, and only where the engine has
+# \\DeclareUnicodeCharacter (pdfLaTeX); XeLaTeX/LuaLaTeX need nothing.
+_PDFLATEX_CHARS = {
+    "\u2006": "\\,",
+    "\u2009": "\\,",
+    "\u202f": "\\,",
+    "\u2190": "\\ensuremath{\\leftarrow}",
+    "\u25b7": "\\ensuremath{\\triangleright}",
+    "\u220e": "\\leavevmode\\rule{1ex}{1ex}",
+}
 _BLANK_RUN_RE = re.compile(r"\n{3,}")
 # Older pandoc wraps headings as \hypertarget{id}{%\n\section{...}\label{id}}.
 _HYPERTARGET_RE = re.compile(
@@ -62,6 +74,14 @@ def _unwrap_pandocbounded(latex: str) -> str:
         i = j
     out.append(latex[i:])
     return "".join(out)
+
+
+def _unicode_declarations(latex: str) -> str:
+    used = [char for char in _PDFLATEX_CHARS if char in latex]
+    if not used:
+        return ""
+    lines = [f"  \\DeclareUnicodeCharacter{{{ord(c):04X}}}{{{_PDFLATEX_CHARS[c]}}}" for c in used]
+    return "\\ifdefined\\DeclareUnicodeCharacter\n" + "\n".join(lines) + "\n\\fi"
 
 
 def _inject_package(latex: str, package_line: str) -> str:
@@ -159,6 +179,8 @@ def convert_md_to_latex(
     if standalone:
         if MHCHEM_RE.search(latex):
             latex = _inject_package(latex, _MHCHEM_PACKAGE)
+        if declarations := _unicode_declarations(latex):
+            latex = _inject_package(latex, declarations)
     else:
         # Fragments must not depend on macros defined only in pandoc's template.
         latex = _TIGHTLIST_RE.sub("", latex)

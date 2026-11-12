@@ -1,0 +1,186 @@
+{
+  "schema": 1,
+  "description": "arXiv e-prints used as a regression corpus. Only CC BY 4.0 or CC0 papers, licence read from the arXiv abs page (licence_source) on licence_checked. E-prints are fetched by versioned id and verified by sha256; they are not stored in git.",
+  "papers": [
+    {
+      "id": "2402.18824v1",
+      "category": "cs.LG",
+      "licence": "http://creativecommons.org/licenses/by/4.0/",
+      "licence_source": "https://arxiv.org/abs/2402.18824v1",
+      "licence_checked": "2026-11-12",
+      "sha256": "fd7120681c25c6f458bd65005048510f797eb63e73a5bc8303c7413f2e9dc01c",
+      "bytes": 2307430,
+      "expect": {
+        "headings": [
+          12,
+          20
+        ],
+        "min_display_equations": 44,
+        "min_tables": 0,
+        "min_references": 21
+      }
+    },
+    {
+      "id": "2402.14614v1",
+      "category": "cs.CL",
+      "licence": "http://creativecommons.org/licenses/by/4.0/",
+      "licence_source": "https://arxiv.org/abs/2402.14614v1",
+      "licence_checked": "2026-11-12",
+      "sha256": "edcabd2688d341591b2a5d6963c773b119855a0e8dc92c5d1ae39a3690b51124",
+      "bytes": 8165315,
+      "expect": {
+        "headings": [
+          20,
+          31
+        ],
+        "min_display_equations": 15,
+        "min_tables": 0,
+        "min_references": 9
+      }
+    },
+    {
+      "id": "2402.19259v1",
+      "category": "cs.DS",
+      "licence": "http://creativecommons.org/licenses/by/4.0/",
+      "licence_source": "https://arxiv.org/abs/2402.19259v1",
+      "licence_checked": "2026-11-12",
+      "sha256": "64816459220aae634b5fff41cd386fdf908949a17e1f1dd9c902d218118008bb",
+      "bytes": 319164,
+      "expect": {
+        "headings": [
+          17,
+          27
+        ],
+        "min_display_equations": 51,
+        "min_tables": 0,
+        "min_references": 23
+      }
+    },
+    {
+      "id": "2402.19153v1",
+      "category": "math.AP",
+      "licence": "http://creativecommons.org/licenses/by/4.0/",
+      "licence_source": "https://arxiv.org/abs/2402.19153v1",
+      "licence_checked": "2026-11-12",
+      "sha256": "0ffdee39f94bea2e0f3a7782a3df743d8248b67f5e4fdff6e50576bdea4e7313",
+      "bytes": 12958,
+      "expect": {
+        "headings": [
+          4,
+          7
+        ],
+        "min_display_equations": 63,
+        "min_tables": 0,
+        "min_references": 11
+      }
+    },
+    {
+      "id": "2402.17688v1",
+      "category": "math.NA",
+      "licence": "http://creativecommons.org/licenses/by/4.0/",
+      "licence_source": "https://arxiv.org/abs/2402.17688v1",
+      "licence_checked": "2026-11-12",
+      "sha256": "e43ccf6628d1c3ed034ca4b8ff7b06fb6b0f0c18fde06968e6f1250aeaa65af0",
+      "bytes": 16178743,
+      "expect": {
+        "headings": [
+          21,
+          33
+        ],
+        "min_display_equations": 24,
+        "min_tables": 0,
+        "min_references": 60
+      }
+    },
+    {
+      "id": "2402.18725v1",
+      "category": "math.OC",
+      "licence": "http://creativecommons.org/licenses/by/4.0/",
+      "licence_source": "https://arxiv.org/abs/2402.18725v1",
+      "licence_checked": "2026-11-12",
+      "sha256": "7ac0bc312c0fb8c0d728a67114674038b229295138a3a360b1e645cf54eb5245",
+      "bytes": 5967972,
+      "expect": {
+        "headings": [
+          24,
+          37
+        ],
+        "min_display_equations": 48,
+        "min_tables": 2,
+        "min_references": 18
+      }
+    },
+    {
+      "id": "2402.18628v1",
+      "category": "astro-ph.GA",
+      "licence": "http://creativecommons.org/licenses/by/4.0/",
+      "licence_source": "https://arxiv.org/abs/2402.18628v1",
+      "licence_checked": "2026-11-12",
+      "sha256": "a30af5950b7c8eea1debcd6bf6adcca8ef948d3dc8d37ba0d24c7392707c7639",
+      "bytes": 488529,
+      "expect": {
+        "headings": [
+          10,
+          16
+        ],
+        "min_display_equations": 12,
+        "min_tables": 0,
+        "min_references": 59
+      }
+    },
+    {
+      "id": "2402.19190v1",
+      "category": "q-bio.PE",
+      "licence": "http://creativecommons.org/licenses/by/4.0/",
+      "licence_source": "https://arxiv.org/abs/2402.19190v1",
+      "licence_checked": "2026-11-12",
+      "sha256": "3201d9910ce7cd804548c448c0d49776961e3bb7d41bb3cafa7a163563119fc6",
+      "bytes": 43294,
+      "expect": {
+        "headings": [
+          9,
+          15
+        ],
+        "min_display_equations": 34,
+        "min_tables": 0,
+        "min_references": 24
+      }
+    },
+    {
+      "id": "2402.18821v1",
+      "category": "cs.CV",
+      "licence": "http://creativecommons.org/licenses/by/4.0/",
+      "licence_source": "https://arxiv.org/abs/2402.18821v1",
+      "licence_checked": "2026-11-12",
+      "sha256": "4be12fee4cabadba1d331b18a5915c36c531089f5fa5b68cf5bc94eae970a1e0",
+      "bytes": 7667855,
+      "expect": {
+        "headings": [
+          15,
+          23
+        ],
+        "min_display_equations": 2,
+        "min_tables": 2,
+        "min_references": 21
+      }
+    },
+    {
+      "id": "2402.18684v1",
+      "category": "quant-ph",
+      "licence": "http://creativecommons.org/licenses/by/4.0/",
+      "licence_source": "https://arxiv.org/abs/2402.18684v1",
+      "licence_checked": "2026-11-12",
+      "sha256": "126ed19be421f965e28444dfff3d92bce5d978a8a5c9534cd8344fb69e550ee2",
+      "bytes": 53667,
+      "expect": {
+        "headings": [
+          12,
+          20
+        ],
+        "min_display_equations": 24,
+        "min_tables": 0,
+        "min_references": 19
+      }
+    }
+  ]
+}

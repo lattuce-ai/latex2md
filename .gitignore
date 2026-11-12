@@ -5,3 +5,5 @@ build/
 dist/
 .venv/
 dist/
+tests/corpus/cache/
+compile-output/

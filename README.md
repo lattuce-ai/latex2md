@@ -17,6 +17,8 @@ sudo apt-get install pandoc
 pip install lattuce-latex2md
 ```
 
+It supports Python 3.11 to 3.14 and has no Python dependencies.
+
 The distribution is called `lattuce-latex2md` (the name `latex2md` is taken on PyPI
 by an unrelated project); the import name is `latex2md`. From a checkout:
 `pip install -e .`.
@@ -79,6 +81,9 @@ flat = flatten_latex(Path("paper/main.tex"))   # a Path is a file ...
 flat = flatten_latex(tex_text, base_dir="paper/")  # ... a str is LaTeX source
 ```
 
+All errors (pandoc missing, failing or timing out) raise `ConversionError`; its
+`.stderr` holds pandoc's message.
+
 ### Archives
 
 `open_latex_archive(data, limits=ArchiveLimits())` is a context manager that
@@ -110,9 +115,6 @@ on sizes claimed in headers. Exceeding one, or invalid data, raises
 `ArchiveError` (a `ConversionError`). Symlinks, hard links, devices and
 members with absolute or `..` paths are skipped and reported as
 `skipped_member` warnings.
-
-All errors (pandoc missing, failing or timing out) raise `ConversionError`; its
-`.stderr` holds pandoc's message.
 
 ### Warnings
 
@@ -312,9 +314,38 @@ pip install -e '.[dev]'
 pytest
 ```
 
+CI runs the tests on Python 3.11, 3.13 and 3.14 with Ubuntu's pandoc and
+pandoc 3.6.4, plus two more jobs:
+
+- **compile**: `python scripts/compile_check.py` converts the Markdown fixtures
+  and LaTeX → Markdown → LaTeX round trips to standalone documents (and the
+  Markdown fixture as a fragment in a plain preamble) and compiles each with
+  `latexmk -pdf -interaction=nonstopmode`. It needs TeX Live
+  (`texlive-latex-recommended texlive-latex-extra texlive-science latexmk`).
+- **corpus**: ten real arXiv papers (cs, math, astro-ph, q-bio, quant-ph),
+  listed in `tests/corpus/manifest.json` with their licence, the sha256 of the
+  e-print and structural expectations (heading range, minimum display
+  equations, tables and references). Only papers whose arXiv licence is
+  CC BY 4.0 or CC0 (read from the abs page) are listed; the e-prints are
+  downloaded into a gitignored cache (`tests/corpus/cache/`, or
+  `LATEX2MD_CORPUS_CACHE`), never committed.
+
+```bash
+python scripts/fetch_corpus.py                    # download and verify the e-prints
+LATEX2MD_CORPUS=1 pytest tests/test_corpus.py     # convert and check them
+python scripts/fetch_corpus.py --check-licences   # re-check licences on arxiv.org
+python scripts/fetch_corpus.py --add 2402.18824v1 --pandoc pandoc --pandoc /path/to/pandoc-3.6.4
+```
+
+`--add` refuses papers that are not CC BY 4.0/CC0, downloads the versioned
+e-print, converts it with each pandoc and prints a manifest entry with the
+measurements and expectations to paste into the manifest. The corpus test
+also checks that the Markdown has no `\begin{`/`\end{` outside math and code,
+no `<div` and no `:::`.
+
 ## Releasing
 
 Bump `version` in `pyproject.toml` and `__version__` in `src/latex2md/__init__.py`,
-then push a matching tag (`v0.2.0`). The `release` workflow tests, builds and
+then push a matching tag (`v0.3.0`). The `release` workflow tests, builds and
 publishes to PyPI with trusted publishing (setup steps are in
 `.github/workflows/release.yml`).
