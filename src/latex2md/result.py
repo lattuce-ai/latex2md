@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 # Kinds a caller can match on. "pandoc" is the catch-all for other pandoc warnings.
 WARNING_KINDS = (
     "skipped_include",
+    "skipped_member",
     "unknown_command",
     "unknown_environment",
     "missing_bibliography",

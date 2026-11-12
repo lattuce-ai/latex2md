@@ -37,6 +37,14 @@ latex2md to-md paper.tex -o paper.md
 latex2md auto paper.tex
 ```
 
+```bash
+latex2md to-md 2401.12345.tar.gz -o paper.md   # arXiv source archive (.zip/.tar/.tar.gz/.tgz)
+```
+
+```bash
+latex2md flatten main.tex -o flat.tex          # one .tex with includes inlined
+```
+
 - With no input file, or `-`, it reads stdin. With no `-o`, it writes to stdout.
 - `auto` picks the direction from the extension (`.md/.markdown` or `.tex/.latex/.ltx`).
 - `--standalone` (for `to-latex` and `auto`) writes a complete document with a preamble.
@@ -48,7 +56,9 @@ latex2md auto paper.tex
 ## Python
 
 ```python
-from latex2md import md_to_latex, latex_to_md, ConversionError
+from pathlib import Path
+
+from latex2md import flatten_latex, latex_archive_to_md, latex_file_to_md, latex_to_md, md_to_latex
 
 tex = md_to_latex("# Title\n\nEnergy is $E = mc^2$ [@einstein1905].")
 md = latex_to_md(r"\section{Title} Energy is $E = mc^2$ \cite{einstein1905}.")
@@ -58,7 +68,46 @@ full = md_to_latex(markdown_text, standalone=True)
 md = latex_file_to_md("paper/main.tex")                      # YAML front matter
 md = latex_file_to_md("paper/main.tex", front_matter=False)  # abstract as a section
 md = latex_to_md(tex_text, base_dir="paper/")                # text + project folder
+
+# Source archives as downloaded from arXiv (bytes):
+md = latex_archive_to_md(Path("2401.12345.tar.gz").read_bytes())
+
+# The pre-pandoc pipeline only: one LaTeX file, includes inlined.
+flat = flatten_latex(Path("paper/main.tex"))   # a Path is a file ...
+flat = flatten_latex(tex_text, base_dir="paper/")  # ... a str is LaTeX source
 ```
+
+### Archives
+
+`open_latex_archive(data, limits=ArchiveLimits())` is a context manager that
+unpacks a zip, tar, tar.gz/bz2/xz, a single gzip'd `.tex` (arXiv serves these
+for one-file papers) or a bare `.tex` into a private temporary folder, and
+yields `(root_dir, main_tex)`. The folder is deleted afterwards.
+
+```python
+from latex2md import ArchiveLimits, latex_file_to_md, open_latex_archive
+
+with open_latex_archive(data, limits=ArchiveLimits(max_total_bytes=50_000_000)) as (root, main_tex):
+    md = latex_file_to_md(main_tex, base_dir=root)
+```
+
+The main file is the one named `toplevel` in arXiv's `00README.json`, else a
+`.tex` with both `\documentclass` and `\begin{document}` (preferring
+`main`/`paper`/`ms`, then the shallowest), else `main`/`paper`/`ms.tex`, else
+the shallowest `.tex`.
+
+| `ArchiveLimits` field | Default |
+|---|---|
+| `max_total_bytes` (all extracted files) | 200 MB |
+| `max_members` | 2,000 |
+| `max_file_bytes` (one file) | 50 MB |
+| `max_ratio` (extracted / archive size, checked after the first 1 MB) | 100 |
+
+Limits are checked on the bytes actually decompressed, while streaming, not
+on sizes claimed in headers. Exceeding one, or invalid data, raises
+`ArchiveError` (a `ConversionError`). Symlinks, hard links, devices and
+members with absolute or `..` paths are skipped and reported as
+`skipped_member` warnings.
 
 All errors (pandoc missing, failing or timing out) raise `ConversionError`; its
 `.stderr` holds pandoc's message.
@@ -79,6 +128,7 @@ for warning in result.warnings:
 
 | Kind | Raised when |
 |---|---|
+| `skipped_member` | an archive member was not extracted (link, device, path outside the archive) |
 | `skipped_include` | an include was not inlined: absolute path, outside the base folder, missing, cycle, nesting too deep, size budget used up, or no base folder |
 | `unknown_command` | pandoc skipped a command it does not know (layout-only commands such as `\centering` are not reported) |
 | `unknown_environment` | pandoc did not know an environment; its content is kept |
@@ -121,7 +171,8 @@ pandoc read files itself: pandoc always runs with `--sandbox`, and latex2md
 inlines includes only when they resolve inside the base folder. Absolute paths,
 `..` escapes, symlinks pointing outside, cycles, nesting deeper than 16 levels and
 more than 20 MB of included files are skipped. Without a base folder, include
-commands are removed. This makes it safe to run on untrusted uploads.
+commands are removed. Archives are unpacked under the limits above. This makes
+it safe to run on untrusted uploads.
 
 ## Limitations
 

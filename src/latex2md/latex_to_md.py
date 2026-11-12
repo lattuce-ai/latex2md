@@ -5,9 +5,8 @@ import re
 from importlib import resources
 from pathlib import Path
 
-from latex2md.comments import strip_comments
-from latex2md.includes import expand_includes
-from latex2md.mhchem import wrap_text_mode_mhchem
+from latex2md.archive import ArchiveLimits, extract_archive
+from latex2md.flatten import flatten_source, read_tex, sibling_bbl
 from latex2md.pandoc import MARKDOWN_OUT, pandoc_messages, run_pandoc_output
 from latex2md.result import ConversionResult, WarningLog
 
@@ -23,7 +22,6 @@ _LUA_FILTER = "latex_to_md.lua"
 _THEBIBLIOGRAPHY_BEGIN_RE = re.compile(r"\\begin\{thebibliography\}\s*\{[^{}]*\}")
 _THEBIBLIOGRAPHY_END_RE = re.compile(r"\\end\{thebibliography\}")
 _BIBITEM_RE = re.compile(r"\\bibitem\s*(?:\[[^\]]*\])?\s*\{[^{}]*\}")
-_BIBLIOGRAPHY_RE = re.compile(r"\\bibliography\s*\{[^{}]*\}")
 _BIB_COMMAND_RE = re.compile(r"\\(?:bibliography|addbibresource)\s*(?:\[[^\]]*\])?\s*\{([^{}]*)\}")
 _BEGIN_DOCUMENT = "\\begin{document}"
 _FENCE_CLASS_RE = re.compile(r"^(\s*)(`{3,}|~{3,}) (\w[\w-]*)$")
@@ -96,16 +94,14 @@ def convert_latex_to_md(
     bibliographies.
     """
     warnings = WarningLog()
-    source = expand_includes(strip_comments(latex), base_dir, warnings=warnings)
-    if bbl is not None:
-        source = _BIBLIOGRAPHY_RE.sub(lambda _: strip_comments(bbl), source, count=1)
-    else:
+    source = flatten_source(latex, base_dir=base_dir, bbl=bbl, warnings=warnings)
+    if bbl is None:
         for match in _BIB_COMMAND_RE.finditer(source):
             warnings.add(
                 "missing_bibliography",
                 f"{match.group(0)}: no .bbl given, so citations stay as [@key]",
             )
-    source = wrap_text_mode_mhchem(_bibliography_as_list(source))
+    source = _bibliography_as_list(source)
     args = ["--wrap=none", "--verbose"]
     args.append("--standalone" if front_matter else "--metadata=latex2md_body_abstract:true")
     with resources.as_file(resources.files("latex2md") / _LUA_FILTER) as lua_filter:
@@ -152,13 +148,11 @@ def convert_latex_file_to_md(
 ) -> ConversionResult:
     """:func:`latex_file_to_md`, returning a :class:`~latex2md.result.ConversionResult`."""
     path = Path(path)
-    bbl_path = path.with_suffix(".bbl")
-    bbl = bbl_path.read_text(encoding="utf-8", errors="replace") if bbl_path.is_file() else None
     return convert_latex_to_md(
-        path.read_text(encoding="utf-8", errors="replace"),
+        read_tex(path),
         base_dir=base_dir or path.parent,
         front_matter=front_matter,
-        bbl=bbl,
+        bbl=sibling_bbl(path),
     )
 
 
@@ -174,3 +168,36 @@ def latex_file_to_md(
     with the same name, as shipped in arXiv sources, fills in the bibliography.
     """
     return convert_latex_file_to_md(path, base_dir=base_dir, front_matter=front_matter).text
+
+
+def convert_latex_archive_to_md(
+    data: bytes,
+    *,
+    front_matter: bool = True,
+    limits: ArchiveLimits | None = None,
+) -> ConversionResult:
+    """:func:`latex_archive_to_md`, returning a :class:`~latex2md.result.ConversionResult`.
+
+    Archive members that were not extracted are reported as ``skipped_member``.
+    """
+    with extract_archive(data, limits=limits) as archive:
+        result = convert_latex_file_to_md(archive.main_tex, base_dir=archive.root, front_matter=front_matter)
+    warnings = WarningLog(result.warnings)
+    for message in archive.skipped:
+        warnings.add("skipped_member", message)
+    return ConversionResult(result.text, list(warnings))
+
+
+def latex_archive_to_md(
+    data: bytes,
+    *,
+    front_matter: bool = True,
+    limits: ArchiveLimits | None = None,
+) -> str:
+    """Convert an arXiv-style source archive (zip, tar, tar.gz, gzip'd or bare ``.tex``).
+
+    The archive is unpacked into a private temporary folder under ``limits``
+    (see :class:`~latex2md.archive.ArchiveLimits`), the main file is picked as
+    LaTeX would be run on it, and it is converted like :func:`latex_file_to_md`.
+    """
+    return convert_latex_archive_to_md(data, front_matter=front_matter, limits=limits).text
