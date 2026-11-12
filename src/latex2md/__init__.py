@@ -31,4 +31,4 @@ __all__ = [
     "open_latex_archive",
     "pandoc_available",
 ]
-__version__ = "0.3.0"
+__version__ = "0.3.1"

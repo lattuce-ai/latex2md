@@ -123,8 +123,13 @@ def convert_latex_to_md(
     anchors: bool = False,
     csl: str | Path | None = None,
     cite_style: CiteStyle = "keep",
+    start_dir: str | Path | None = None,
 ) -> ConversionResult:
     """Convert LaTeX to Markdown and report what could not be carried over.
+
+    ``start_dir`` is the folder the main file is compiled from (its own
+    folder); ``\\input`` and ``\\bibliography`` resolve there first, as in LaTeX,
+    and it defaults to ``base_dir``. File and archive conversions set it.
 
     Takes the same arguments as :func:`latex_to_md` and returns a
     :class:`~latex2md.result.ConversionResult` whose ``warnings`` list skipped
@@ -134,8 +139,8 @@ def convert_latex_to_md(
     if cite_style not in ("keep", "rendered"):
         raise ValueError(f"cite_style must be 'keep' or 'rendered', not {cite_style!r}")
     warnings = WarningLog()
-    source = _DEF_PREFIX_RE.sub("", flatten_source(latex, base_dir=base_dir, bbl=bbl, warnings=warnings))
-    bibs = BibFiles() if bbl is not None else find_bib_files(source, base_dir)
+    source = _DEF_PREFIX_RE.sub("", flatten_source(latex, base_dir=base_dir, bbl=bbl, warnings=warnings, start_dir=start_dir))
+    bibs = BibFiles() if bbl is not None else find_bib_files(source, base_dir, start_dir=start_dir)
     warnings.extend_unique(bibs.warnings)
     style = checked_file(csl, base_dir, what="CSL style") if csl is not None else None
     source, structure_warnings = resolve_structure(_bibliography_as_list(source), anchors=anchors)
@@ -244,6 +249,7 @@ def convert_latex_file_to_md(
         anchors=anchors,
         csl=csl,
         cite_style=cite_style,
+        start_dir=path.parent,
     )
 
 

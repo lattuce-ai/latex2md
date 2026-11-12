@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lattuce-latex2md"
-version = "0.3.0"
+version = "0.3.1"
 description = "Markdown <-> LaTeX conversion built on pandoc, with math, mhchem and citation clean-up."
 readme = "README.md"
 requires-python = ">=3.11"

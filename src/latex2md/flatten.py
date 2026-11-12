@@ -55,8 +55,9 @@ def flatten_source(
     base_dir: str | Path | None,
     bbl: str | None,
     warnings: list[ConversionWarning] | None = None,
+    start_dir: str | Path | None = None,
 ) -> str:
-    source = expand_includes(strip_comments(latex), base_dir, warnings=warnings)
+    source = expand_includes(strip_comments(latex), base_dir, warnings=warnings, start_dir=start_dir)
     if bbl is not None:
         source = inline_bbl(source, bbl)
     return wrap_text_mode_mhchem(source)
@@ -87,5 +88,6 @@ def flatten_latex(
             read_tex(path),
             base_dir=base_dir or path.parent,
             bbl=bbl if bbl is not None else sibling_bbl(path),
+            start_dir=path.parent,
         )
     return flatten_source(path_or_text, base_dir=base_dir, bbl=bbl)

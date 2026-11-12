@@ -35,13 +35,20 @@ class _Skip(Exception):
     """An include that is not inlined, with the reason shown in warnings."""
 
 
-def _resolve(base_dir: Path, current_dir: Path, name: str, *, add_tex: bool) -> Path:
+def _resolve(base_dir: Path, current_dir: Path, name: str, *, add_tex: bool, start_dir: Path | None = None) -> Path:
+    """Find ``name`` the way LaTeX does, but only inside ``base_dir``.
+
+    TeX resolves every ``\\input`` against the folder the main file is compiled
+    from (``start_dir``), including inputs nested in subfolders. The including
+    file's folder and the project root are tried after it as lenient fallbacks.
+    """
     name = name.strip().strip('"')
     if not name:
         raise _Skip("empty file name")
     if Path(name).is_absolute() or name.startswith("~"):
         raise _Skip("absolute path")
-    candidates = [current_dir / name, base_dir / name]
+    folders = [folder for folder in (start_dir, current_dir, base_dir) if folder is not None]
+    candidates = list(dict.fromkeys(folder / name for folder in folders))
     if add_tex and not name.endswith(".tex"):
         candidates = [path for c in candidates for path in (c.with_name(c.name + ".tex"), c)]
     root = base_dir.resolve()
@@ -70,8 +77,9 @@ def _read(path: Path, budget: _Budget) -> str:
 
 
 class _Expander:
-    def __init__(self, base_dir: Path, warnings: list[ConversionWarning] | None) -> None:
+    def __init__(self, base_dir: Path, warnings: list[ConversionWarning] | None, start_dir: Path | None = None) -> None:
         self.base_dir = base_dir
+        self.start_dir = start_dir
         self.budget = _Budget()
         self.warnings = warnings
 
@@ -85,7 +93,7 @@ class _Expander:
     def expand(self, text: str, current_dir: Path, stack: tuple[Path, ...]) -> str:
         def include(command: str, name: str) -> str:
             try:
-                path = _resolve(self.base_dir, current_dir, name, add_tex=True)
+                path = _resolve(self.base_dir, current_dir, name, add_tex=True, start_dir=self.start_dir)
                 if path in stack:
                     raise _Skip("include cycle")
                 if len(stack) >= MAX_INCLUDE_DEPTH:
@@ -104,7 +112,7 @@ class _Expander:
 
         def replace_listing(match: re.Match[str]) -> str:
             try:
-                path = _resolve(self.base_dir, current_dir, match.group(2), add_tex=False)
+                path = _resolve(self.base_dir, current_dir, match.group(2), add_tex=False, start_dir=self.start_dir)
                 content = _read(path, self.budget)
             except _Skip as skip:
                 return self.skip(match.group(0).strip(), str(skip))
@@ -128,7 +136,13 @@ def _subfile_body(text: str) -> str:
     return text
 
 
-def expand_includes(latex: str, base_dir: str | Path | None, *, warnings: list[ConversionWarning] | None = None) -> str:
+def expand_includes(
+    latex: str,
+    base_dir: str | Path | None,
+    *,
+    warnings: list[ConversionWarning] | None = None,
+    start_dir: str | Path | None = None,
+) -> str:
     """Inline include commands resolved under ``base_dir``; drop the rest.
 
     ``latex`` must already have its comments stripped. With no ``base_dir``
@@ -146,4 +160,7 @@ def expand_includes(latex: str, base_dir: str | Path | None, *, warnings: list[C
         text = _IMPORT_RE.sub(drop, text)
         return _INPUT_RE.sub(drop, text)
     root = Path(base_dir).resolve()
-    return _Expander(root, warnings).expand(latex, root, ())
+    start = Path(start_dir).resolve() if start_dir is not None else root
+    if not start.is_relative_to(root):
+        start = root
+    return _Expander(root, warnings, start).expand(latex, start, ())
